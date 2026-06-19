@@ -30,3 +30,18 @@ Recommended Dokploy setup:
 5. Add domain and SSL settings in Dokploy.
 
 The app is a static React/Vite build served by nginx. Future API services for Paperclip, Ollama, tenant data, leads, and approvals can be added as separate services in `docker-compose.yml`.
+
+## Production Scope
+
+This repository currently ships the production-ready frontend shell:
+
+- Multi-tenant and multi-user workspace controls
+- Digital and social media marketing module
+- Lead generation and qualification module
+- Follow-up workbench
+- Customer relationship dashboard
+- Admin AI-agent configuration for Paperclip and Ollama
+- Human approval and audit-oriented workflow surfaces
+- Dokploy-compatible Docker/nginx deployment
+
+Backend persistence, authentication, Paperclip execution APIs, Ollama inference routing, and channel-specific publishing integrations should be attached as services behind this frontend.
