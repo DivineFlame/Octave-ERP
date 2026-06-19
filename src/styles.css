@@ -1,0 +1,749 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  --bg: #f6f7f9;
+  --ink: #172026;
+  --muted: #66737f;
+  --line: #dfe5ea;
+  --panel: #ffffff;
+  --panel-2: #eef5f2;
+  --green: #15735c;
+  --teal: #0f8793;
+  --coral: #d65c48;
+  --gold: #b57918;
+  --blue: #2769a8;
+  --shadow: 0 14px 40px rgba(22, 34, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 18px 15px;
+  background: #18252b;
+  color: #f8fbfb;
+}
+
+.brand,
+.approvalPanel,
+.navItem,
+.topbar,
+.tenantSelect,
+.searchBox,
+.userSelect,
+.metric,
+.panelHeader,
+.timeItem,
+.leadRow,
+.agentTop,
+.formActions,
+.channelIcons,
+.signalHeader {
+  display: flex;
+  align-items: center;
+}
+
+.brand {
+  gap: 10px;
+  min-height: 40px;
+}
+
+.brandMark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: #35a489;
+  color: white;
+  font-weight: 800;
+}
+
+.brand strong,
+.campaignRow h3,
+.leadRow h3,
+.agentCard h3 {
+  display: block;
+  margin: 0;
+}
+
+.brand span {
+  display: block;
+  color: #b8c6cb;
+  font-size: 12px;
+}
+
+.navList {
+  display: grid;
+  gap: 5px;
+  margin-top: 26px;
+}
+
+.navItem {
+  width: 100%;
+  min-height: 34px;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: #c7d3d7;
+  text-align: left;
+}
+
+.navItem.active,
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.approvalPanel {
+  gap: 9px;
+  margin-top: auto;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.approvalPanel div {
+  min-width: 0;
+  flex: 1;
+}
+
+.approvalPanel strong,
+.approvalPanel span {
+  display: block;
+}
+
+.approvalPanel span {
+  margin-top: 2px;
+  color: #b8c6cb;
+  font-size: 12px;
+}
+
+.switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #58666d;
+}
+
+.switch span::after {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  content: "";
+  transition: transform 160ms ease;
+}
+
+.switch input:checked + span {
+  background: #35a489;
+}
+
+.switch input:checked + span::after {
+  transform: translateX(16px);
+}
+
+.workspace {
+  min-width: 0;
+  padding: 16px 22px 28px;
+}
+
+.topbar {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  gap: 11px;
+  padding: 6px 0 14px;
+  background: rgba(246, 247, 249, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+.tenantSelect,
+.searchBox,
+.userSelect {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.tenantSelect {
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.tenantSelect select,
+.userSelect select,
+.agentForm select {
+  appearance: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.searchBox {
+  flex: 1;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.searchBox input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+}
+
+.userSelect {
+  gap: 8px;
+  padding: 0 10px 0 5px;
+}
+
+.avatar {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  background: #e6f1ed;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.heroBand {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 19px;
+  min-height: 190px;
+  padding: 22px;
+  overflow: hidden;
+  border-radius: 8px;
+  background:
+    linear-gradient(110deg, rgba(21, 115, 92, 0.94), rgba(15, 135, 147, 0.88)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='420' viewBox='0 0 800 420'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.22'%3E%3Cpath d='M0 320 C170 210 230 390 400 260 S650 155 800 240'/%3E%3Cpath d='M0 180 C140 80 275 250 410 135 S640 35 800 120'/%3E%3Cpath d='M90 420 C170 310 260 330 350 235 S590 170 705 30'/%3E%3C/g%3E%3Cg fill='%23ffffff' fill-opacity='.28'%3E%3Ccircle cx='140' cy='160' r='6'/%3E%3Ccircle cx='410' cy='135' r='7'/%3E%3Ccircle cx='675' cy='84' r='6'/%3E%3Ccircle cx='350' cy='235' r='7'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: cover;
+  color: white;
+}
+
+.heroCopy {
+  align-self: center;
+  max-width: 780px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 11px;
+  color: #e8fffa;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.heroCopy h1 {
+  margin: 0;
+  max-width: 720px;
+  font-size: clamp(28px, 3.8vw, 48px);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.heroCopy p {
+  max-width: 720px;
+  margin: 14px 0 0;
+  color: #e6fffb;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.signalBoard {
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.signalHeader,
+.channelIcons {
+  justify-content: space-between;
+}
+
+.signalBars {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.signalBars span {
+  min-height: 27px;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, #ffffff, #bff8e9);
+}
+
+.channelIcons {
+  color: #e8fffa;
+}
+
+.statsGrid,
+.contentGrid {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.statsGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric,
+.panel,
+.widePanel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.metric {
+  align-items: flex-start;
+  flex-direction: column;
+  min-height: 100px;
+  padding: 12px;
+}
+
+.metricIcon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: #e9f4f0;
+  color: var(--green);
+}
+
+.metric span,
+.metric small,
+.campaignRow p,
+.campaignRow small,
+.timeItem p,
+.leadRow p,
+.agentCard p,
+.agentCard footer {
+  color: var(--muted);
+}
+
+.metric span {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.metric strong {
+  margin-top: 4px;
+  font-size: 23px;
+}
+
+.metric small {
+  margin-top: auto;
+}
+
+.contentGrid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  align-items: start;
+}
+
+.panel,
+.widePanel {
+  min-width: 0;
+  padding: 12px;
+}
+
+.widePanel {
+  grid-column: 1 / -1;
+}
+
+.panelHeader {
+  justify-content: space-between;
+  gap: 11px;
+  margin-bottom: 12px;
+}
+
+.panelHeader div,
+.panelHeader button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panelHeader h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.panelHeader button,
+.primaryButton,
+.secondaryButton {
+  min-height: 30px;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.panelHeader button,
+.secondaryButton {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.primaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: var(--green);
+  color: #fff;
+}
+
+.campaignList,
+.leadList,
+.agentCards,
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.campaignRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.campaignRow p,
+.leadRow p,
+.timeItem p,
+.agentCard p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.chips span {
+  border-radius: 8px;
+  padding: 4px 7px;
+  background: #edf3f4;
+  color: #35515b;
+  font-size: 12px;
+}
+
+.progressBlock {
+  align-self: center;
+}
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  font-size: 13px;
+}
+
+.progressTrack {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5ebef;
+}
+
+.progressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green), var(--teal));
+}
+
+.progressBlock small {
+  display: block;
+  margin-top: 7px;
+}
+
+.timeItem {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.time {
+  display: grid;
+  width: 46px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eff5fb;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.leadRow {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.leadScore {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #fff3e3;
+  color: var(--gold);
+  font-weight: 900;
+}
+
+.leadRow span {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agentLayout {
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  gap: 13px;
+}
+
+.agentForm {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 11px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.agentForm label {
+  display: grid;
+  gap: 6px;
+  color: #40515a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agentForm input,
+.agentForm select {
+  min-height: 34px;
+  width: 100%;
+  border: 1px solid #cddbd7;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: white;
+}
+
+.formActions {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentCard {
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.agentTop {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agentTop > span {
+  display: grid;
+  min-width: 34px;
+  height: 24px;
+  place-items: center;
+  border-radius: 8px;
+  background: #f8ebe8;
+  color: var(--coral);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.agentCard footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+@media (max-width: 1120px) {
+  .shell {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .brand div:not(.brandMark),
+  .navItem span,
+  .approvalPanel div,
+  .approvalPanel .switch {
+    display: none;
+  }
+
+  .sidebar {
+    align-items: center;
+    padding: 18px 12px;
+  }
+
+  .navItem {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .approvalPanel {
+    justify-content: center;
+    padding: 12px;
+  }
+
+  .heroBand,
+  .agentLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .shell {
+    display: block;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    align-items: stretch;
+  }
+
+  .brand div:not(.brandMark),
+  .navItem span,
+  .approvalPanel div,
+  .approvalPanel .switch {
+    display: block;
+  }
+
+  .navList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 18px;
+  }
+
+  .navItem {
+    justify-content: flex-start;
+    padding: 0 12px;
+  }
+
+  .approvalPanel {
+    margin-top: 18px;
+  }
+
+  .workspace {
+    padding: 16px;
+  }
+
+  .topbar {
+    position: static;
+    display: grid;
+  }
+
+  .heroBand {
+    min-height: auto;
+    padding: 22px;
+  }
+
+  .heroCopy h1 {
+    font-size: 40px;
+  }
+
+  .statsGrid,
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .campaignRow {
+    grid-template-columns: 1fr;
+  }
+}
