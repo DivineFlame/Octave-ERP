@@ -36,10 +36,11 @@ The app is a static React/Vite build served by nginx. Future API services for Pa
 For a direct host-port setup, use these mappings:
 
 - Dokploy dashboard: `3000:80`
-- Octave CRM web GUI: `3001:80`
+- Ollama/Open WebUI: `3001:80`
+- Octave CRM web GUI: `3002:80`
 - Paperclip server: `3100:80`
 
-The included compose file maps Octave CRM to `3001:80` and Paperclip to `3100:80`. Dokploy itself should be installed separately and mapped to `3000:80`.
+The included compose file maps Octave CRM to `3002:80` and Paperclip to `3100:80`. Dokploy itself should be installed separately and mapped to `3000:80`. Ollama/Open WebUI should keep using `3001:80`.
 
 Set the Paperclip image and Ollama URL through environment variables:
 
