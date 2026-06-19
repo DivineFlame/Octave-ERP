@@ -31,6 +31,23 @@ Recommended Dokploy setup:
 
 The app is a static React/Vite build served by nginx. Future API services for Paperclip, Ollama, tenant data, leads, and approvals can be added as separate services in `docker-compose.yml`.
 
+## Server Port Plan
+
+For a direct host-port setup, use these mappings:
+
+- Dokploy dashboard: `3000:80`
+- Octave CRM web GUI: `3001:80`
+- Paperclip server: `3100:80`
+
+The included compose file maps Octave CRM to `3001:80` and Paperclip to `3100:80`. Dokploy itself should be installed separately and mapped to `3000:80`.
+
+Set the Paperclip image and Ollama URL through environment variables:
+
+```bash
+PAPERCLIP_IMAGE=your-paperclip-image:latest
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
 ## Production Scope
 
 This repository currently ships the production-ready frontend shell:
