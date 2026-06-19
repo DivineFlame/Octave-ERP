@@ -42,6 +42,18 @@ Recommended Dokploy setup:
 
 The app is a static React/Vite build served by nginx. Nginx proxies `/api` to the backend service, so the browser does not need direct access to the API port.
 
+## Initial Login Credentials
+
+Change these passwords after first login:
+
+```text
+Platform admin: admin@octave.local / Admin@12345
+Tenant admin: ananya@example.com / Tenant@12345
+Tenant user: karan@example.com / User@12345
+```
+
+Only the platform admin can create companies, create users across tenants, and configure Paperclip/Ollama AI agents. Tenant users can sign in only to their assigned tenant workspace.
+
 ## Server Port Plan
 
 For a direct host-port setup, use these mappings:
@@ -66,6 +78,7 @@ PUBLIC_APP_URL=http://38.247.188.228:3002
 CORS_ORIGIN=http://38.247.188.228:3002
 POSTGRES_PASSWORD=change_this_strong_password
 DEFAULT_OLLAMA_MODEL=llama3.1:8b
+APP_SECRET=change_this_to_a_long_random_secret
 VITE_API_BASE_URL=
 ```
 
@@ -104,6 +117,8 @@ This repository currently ships:
 - Follow-up workbench
 - Customer relationship dashboard
 - Admin AI-agent configuration for Paperclip and Ollama
+- Platform-admin company and tenant-user creation
+- Login-based tenant isolation
 - Human approval and audit-oriented workflow surfaces
 - Backend API service
 - PostgreSQL schema and seed data
@@ -112,13 +127,19 @@ This repository currently ships:
 - Approval queue persistence and approve/reject endpoint
 - Dokploy-compatible Docker/nginx deployment
 
-Authentication and channel-specific publishing integrations should be attached next.
+Channel-specific publishing integrations should be attached next.
 
 ## Backend API
 
 The included API service exposes:
 
 - `GET /health`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET /api/tenants`
+- `POST /api/admin/tenants`
+- `GET /api/admin/users`
+- `POST /api/admin/users`
 - `GET /api/ai/ollama/status`
 - `GET /api/ai/ollama/models`
 - `POST /api/ai/ollama/test`

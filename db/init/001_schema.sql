@@ -13,11 +13,20 @@ create table if not exists app_users (
   tenant_id text not null references tenants(id) on delete cascade,
   name text not null,
   email text unique,
+  password_hash text,
   role text not null,
+  platform_role text not null default 'tenant_user',
   team text,
   initials text,
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table app_users add column if not exists password_hash text;
+alter table app_users add column if not exists platform_role text not null default 'tenant_user';
+alter table app_users add column if not exists is_active boolean not null default true;
+alter table app_users add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
@@ -115,6 +124,28 @@ values
   ('northstar', 'Mira Sen', 'mira@example.com', 'Approver', 'Brand', 'MS'),
   ('northstar', 'Dev Iyer', 'dev@example.com', 'Sales Follow-up', 'CRM', 'DI')
 on conflict (email) do nothing;
+
+insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials)
+values
+  ('northstar', 'Platform Admin', 'admin@octave.local', '1098110b7acd108052bb6381081afe67:aadd845132f93b9f486eda8e1efd2582d3e031cf9f621692368283ac678ca3d31dabe73f65b4c935b100ba11b3fd9d9f1213c39e02254338a326d27db06cd832', 'Platform Admin', 'platform_admin', 'System', 'PA')
+on conflict (email) do update
+  set password_hash = excluded.password_hash,
+      role = excluded.role,
+      platform_role = excluded.platform_role,
+      is_active = true,
+      updated_at = now();
+
+update app_users
+   set password_hash = coalesce(password_hash, '04c9685156f7f8f090f88d1ca8287aa3:9aed23c934104f2bb1e58d846efb1cc12772a0af0758d5e3bcffc729b1ca094979529e967b1868b04c4e1059b72885da571e0152bde2e1db899712608590a3fc'),
+       platform_role = case when role = 'Tenant Admin' then 'tenant_admin' else platform_role end,
+       updated_at = now()
+ where email = 'ananya@example.com';
+
+update app_users
+   set password_hash = coalesce(password_hash, '8da7c471aeae6572f0c6d65ac107ea6b:f10adcf9ffa987f02fe0849cc3006c1b91b9a2f18b5b974e09a77d4136a32636a581c6201e652e5190b1c0fd45177e65862f51142cc9c0e75284ff3fbb1911ac'),
+       platform_role = 'tenant_user',
+       updated_at = now()
+ where email in ('karan@example.com', 'mira@example.com', 'dev@example.com');
 
 insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
 values
