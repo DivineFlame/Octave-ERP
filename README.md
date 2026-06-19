@@ -52,7 +52,7 @@ Tenant admin: ananya@example.com / Tenant@12345
 Tenant user: karan@example.com / User@12345
 ```
 
-Only the platform admin can create, restrict, or delete companies and configure Paperclip/Ollama AI agents. Tenant admins can create users, reset their tenant users' passwords, and configure tenant social handles. Tenant users can sign in only to their assigned tenant workspace and can change their own password from Settings.
+Only the platform admin can create, restrict, or delete companies and configure Paperclip/Ollama AI agents. As a standard operating boundary, the platform admin does not see tenant workspace modules such as Marketing, Leads, Follow-ups, Customers, or approval queues. Tenant admins can create users, reset their tenant users' passwords, and configure tenant social handles. Tenant users can sign in only to their assigned tenant workspace and can change their own password from Settings.
 
 ## Server Port Plan
 
@@ -128,6 +128,7 @@ This repository currently ships:
 - Company restriction and company deletion with cascading tenant-user cleanup
 - Self-service password changes and tenant-admin user password reset
 - Tenant-scoped social media handles and credential storage for agent access
+- Platform-admin separation from tenant operational modules and approval queues
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.

@@ -475,6 +475,9 @@ app.put('/api/ai/agents/:id', requirePlatformAdmin, async (req, res, next) => {
 });
 
 app.post('/api/ai/agents/:id/run', requireAuth, async (req, res, next) => {
+  if (isPlatformAdmin(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Platform admins cannot run tenant workspace agents' });
+  }
   const tenantId = getScopedTenantId(req);
   try {
     const agentResult = await pool.query('select * from ai_agents where id = $1 and tenant_id = $2', [req.params.id, tenantId]);
@@ -537,6 +540,9 @@ app.post('/api/paperclip/tasks', requirePlatformAdmin, async (req, res, next) =>
 });
 
 app.get('/api/approvals', requireAuth, async (req, res, next) => {
+  if (isPlatformAdmin(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Platform admins cannot access tenant approval queues' });
+  }
   try {
     const tenantId = getScopedTenantId(req);
     const result = await pool.query(
@@ -556,6 +562,9 @@ app.get('/api/approvals', requireAuth, async (req, res, next) => {
 });
 
 app.patch('/api/approvals/:id', requireAuth, async (req, res, next) => {
+  if (isPlatformAdmin(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Platform admins cannot decide tenant approvals' });
+  }
   const status = req.body?.status;
   if (!['approved', 'rejected', 'pending'].includes(status)) {
     return res.status(400).json({ ok: false, error: 'status must be approved, rejected, or pending' });

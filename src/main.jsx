@@ -48,6 +48,7 @@ const navBase = [
   ['Overview', LayoutDashboard], ['Marketing', Megaphone], ['Leads', Target],
   ['Follow-ups', Workflow], ['Customers', Users], ['AI Agents', Bot], ['Settings', Settings2]
 ];
+const platformNav = [['Admin', UserCog], ['AI Agents', Bot], ['Settings', Settings2]];
 
 function App() {
   const [session, setSession] = useState(null);
@@ -108,13 +109,13 @@ function LoginPage({ onLogin }) {
 }
 
 function Workspace({ session, onLogout }) {
-  const [view, setView] = useState('Marketing');
+  const isAdmin = session.user.platformRole === 'platform_admin';
+  const [view, setView] = useState(isAdmin ? 'Admin' : 'Marketing');
   const [tenants, setTenants] = useState([session.user.tenant]);
   const [tenantId, setTenantId] = useState(session.user.tenantId);
   const [systemStatus, setSystemStatus] = useState(null);
-  const isAdmin = session.user.platformRole === 'platform_admin';
   const canManageTenant = isAdmin || session.user.platformRole === 'tenant_admin';
-  const nav = canManageTenant ? [['Admin', UserCog], ...navBase] : navBase;
+  const nav = isAdmin ? platformNav : canManageTenant ? [['Admin', UserCog], ...navBase] : navBase;
   const tenant = tenants.find((item) => item.id === tenantId) || session.user.tenant;
 
   useEffect(() => {
@@ -131,14 +132,14 @@ function Workspace({ session, onLogout }) {
       </aside>
       <section className="workspace">
         <Topbar user={session.user} tenants={tenants} tenantId={tenantId} setTenantId={setTenantId} onLogout={onLogout} isAdmin={isAdmin} />
-        <Hero tenant={tenant} />
-        <Stats systemStatus={systemStatus} />
+        {!isAdmin && <Hero tenant={tenant} />}
+        {!isAdmin && <Stats systemStatus={systemStatus} />}
         {view === 'Admin' && canManageTenant && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={isAdmin} />}
-        {view === 'Overview' && <Overview tenantId={tenantId} />}
-        {view === 'Marketing' && <Marketing tenantId={tenantId} />}
-        {view === 'Leads' && <Leads />}
-        {view === 'Follow-ups' && <FollowUps />}
-        {view === 'Customers' && <Customers tenant={tenant} />}
+        {!isAdmin && view === 'Overview' && <Overview tenantId={tenantId} />}
+        {!isAdmin && view === 'Marketing' && <Marketing tenantId={tenantId} />}
+        {!isAdmin && view === 'Leads' && <Leads />}
+        {!isAdmin && view === 'Follow-ups' && <FollowUps />}
+        {!isAdmin && view === 'Customers' && <Customers tenant={tenant} />}
         {view === 'AI Agents' && <AgentAdmin tenantId={tenantId} isAdmin={isAdmin} />}
         {view === 'Settings' && <Settings tenant={tenant} user={session.user} systemStatus={systemStatus} />}
       </section>
@@ -149,7 +150,7 @@ function Workspace({ session, onLogout }) {
 function Topbar({ user, tenants, tenantId, setTenantId, onLogout, isAdmin }) {
   return <header className="topbar">
     <div className="tenantSelect"><Building2 size={18} /><select disabled={!isAdmin} value={tenantId} onChange={(event) => setTenantId(event.target.value)}>{tenants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
-    <div className="searchBox"><Search size={17} /><input placeholder="Search campaigns, leads, customers" /></div>
+    <div className="searchBox"><Search size={17} /><input placeholder={isAdmin ? 'Search companies and users' : 'Search campaigns, leads, customers'} /></div>
     <div className="userSelect"><span className="avatar">{user.initials}</span><strong>{user.name}</strong></div>
     <button className="iconTextButton" onClick={onLogout}><LogOut size={16} /> Logout</button>
   </header>;
@@ -414,7 +415,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
         <div className="formActions"><button className="secondaryButton" type="button" onClick={testOllama}><SlidersHorizontal size={16} /> Test Ollama</button><button className="primaryButton" type="submit"><Check size={16} /> Save agent</button></div>
         <div className="responseBox">{output || 'Paperclip and Ollama output will appear here.'}</div>
       </form>}
-      <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer><button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button></article>)}</div>
+      <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
     </div>
   </Panel></section>;
 }
