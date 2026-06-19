@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
+import nodemailer from 'nodemailer';
 import pg from 'pg';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
@@ -50,7 +51,8 @@ app.post('/api/auth/login', async (req, res, next) => {
 
     const result = await pool.query(
       `select u.id, u.tenant_id, u.name, u.email, u.password_hash, u.role, u.platform_role,
-              u.team, u.initials, u.is_active, t.name as tenant_name, t.plan, t.status as tenant_status
+              u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+              t.status as tenant_status, t.logo_url as tenant_logo_url
          from app_users u
          join tenants t on t.id = u.tenant_id
         where lower(u.email) = $1`,
@@ -116,7 +118,7 @@ app.get('/api/tenants', requireAuth, async (req, res, next) => {
       return res.json({ ok: true, tenants: [req.user.tenant] });
     }
     const result = await pool.query(
-      `select t.id, t.name, t.plan, t.status, count(u.id)::int as users
+      `select t.id, t.name, t.plan, t.status, t.logo_url as "logoUrl", count(u.id)::int as users
          from tenants t
          left join app_users u on u.tenant_id = t.id
         group by t.id
@@ -135,6 +137,7 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
   const adminName = cleanString(req.body?.adminName);
   const adminEmail = cleanString(req.body?.adminEmail)?.toLowerCase();
   const adminPassword = String(req.body?.adminPassword || '');
+  const logoUrl = cleanString(req.body?.logoUrl) || null;
   if (!name) return res.status(400).json({ ok: false, error: 'company name is required' });
 
   const tenantId = slugify(req.body?.id || name);
@@ -144,9 +147,13 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
     const tenant = await client.query(
       `insert into tenants (id, name, plan, status)
        values ($1,$2,$3,$4)
-       returning id, name, plan, status`,
+       returning id, name, plan, status, logo_url as "logoUrl"`,
       [tenantId, name, plan, status]
     );
+    if (logoUrl) {
+      await client.query('update tenants set logo_url = $2 where id = $1', [tenantId, logoUrl]);
+      tenant.rows[0].logoUrl = logoUrl;
+    }
     let user = null;
     if (adminName && adminEmail && adminPassword) {
       user = await createUser(client, {
@@ -160,7 +167,16 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
       });
     }
     await client.query('commit');
-    res.status(201).json({ ok: true, tenant: tenant.rows[0], user });
+    const emailDelivery = user ? await sendCredentialEmail({
+      tenantId: null,
+      to: adminEmail,
+      name: adminName,
+      email: adminEmail,
+      password: adminPassword,
+      createdBy: req.user,
+      tenant: tenant.rows[0]
+    }) : { sent: false, skipped: true, reason: 'tenant admin credentials not provided' };
+    res.status(201).json({ ok: true, tenant: tenant.rows[0], user, emailDelivery });
   } catch (error) {
     await client.query('rollback');
     next(error);
@@ -173,6 +189,7 @@ app.patch('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next)
   const name = cleanString(req.body?.name);
   const plan = cleanString(req.body?.plan);
   const status = cleanString(req.body?.status);
+  const logoUrl = cleanString(req.body?.logoUrl);
   if (status && !['Active', 'Restricted', 'Review'].includes(status)) {
     return res.status(400).json({ ok: false, error: 'status must be Active, Restricted, or Review' });
   }
@@ -182,10 +199,11 @@ app.patch('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next)
       `update tenants
           set name = coalesce($2, name),
               plan = coalesce($3, plan),
-              status = coalesce($4, status)
+              status = coalesce($4, status),
+              logo_url = coalesce($5, logo_url)
         where id = $1
-        returning id, name, plan, status`,
-      [req.params.id, name || null, plan || null, status || null]
+        returning id, name, plan, status, logo_url as "logoUrl"`,
+      [req.params.id, name || null, plan || null, status || null, logoUrl || null]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
     res.json({ ok: true, tenant: result.rows[0] });
@@ -213,7 +231,7 @@ app.get('/api/admin/users', requireAuth, async (req, res, next) => {
     const tenantId = getScopedTenantId(req);
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-              team, initials, is_active as "isActive", created_at as "createdAt"
+              team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"
          from app_users
         where tenant_id = $1
         order by created_at desc`,
@@ -238,9 +256,20 @@ app.post('/api/admin/users', requireAuth, async (req, res, next) => {
       password: String(req.body?.password || ''),
       role: cleanString(req.body?.role) || 'Tenant User',
       platformRole: normalizePlatformRole(req.body?.platformRole || req.body?.role),
-      team: cleanString(req.body?.team)
+      team: cleanString(req.body?.team),
+      avatarUrl: cleanString(req.body?.avatarUrl) || null
     });
-    res.status(201).json({ ok: true, user });
+    const tenantResult = await pool.query('select id, name, plan, status, logo_url as "logoUrl" from tenants where id = $1', [tenantId]);
+    const emailDelivery = await sendCredentialEmail({
+      tenantId: isPlatformAdmin(req.user) ? null : tenantId,
+      to: user.email,
+      name: user.name,
+      email: user.email,
+      password: String(req.body?.password || ''),
+      createdBy: req.user,
+      tenant: tenantResult.rows[0]
+    });
+    res.status(201).json({ ok: true, user, emailDelivery });
   } catch (error) {
     next(error);
   }
@@ -253,7 +282,7 @@ app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) =>
   try {
     const userResult = await pool.query(
       `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-              team, initials, is_active as "isActive", created_at as "createdAt"
+              team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"
          from app_users
         where id = $1`,
       [req.params.id]
@@ -268,6 +297,122 @@ app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) =>
     }
     await pool.query('update app_users set password_hash = $2, updated_at = now() where id = $1', [target.id, hashPassword(newPassword)]);
     res.json({ ok: true, user: target });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/email/config', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getEmailConfigTenantId(req);
+    if (!canManageEmailConfig(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Email configuration access denied' });
+    }
+    const config = await getEmailConfig(tenantId);
+    res.json({ ok: true, config: maskEmailConfig(config, tenantId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/email/config', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getEmailConfigTenantId(req);
+    if (!canManageEmailConfig(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Email configuration access denied' });
+    }
+    const config = normalizeEmailConfig(req.body);
+    const result = await pool.query(
+      `insert into email_configs
+        (tenant_id, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_email, from_name, enabled, updated_by)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       on conflict (tenant_id) do update
+          set smtp_host = excluded.smtp_host,
+              smtp_port = excluded.smtp_port,
+              smtp_secure = excluded.smtp_secure,
+              smtp_user = excluded.smtp_user,
+              smtp_pass = coalesce(excluded.smtp_pass, email_configs.smtp_pass),
+              from_email = excluded.from_email,
+              from_name = excluded.from_name,
+              enabled = excluded.enabled,
+              updated_by = excluded.updated_by,
+              updated_at = now()
+       returning id, tenant_id as "tenantId", smtp_host as "smtpHost", smtp_port as "smtpPort",
+                 smtp_secure as "smtpSecure", smtp_user as "smtpUser", smtp_pass as "smtpPass",
+                 from_email as "fromEmail", from_name as "fromName", enabled`,
+      [tenantId || '__platform__', config.smtpHost, config.smtpPort, config.smtpSecure, config.smtpUser, config.smtpPass || null, config.fromEmail, config.fromName, config.enabled, req.user.id]
+    );
+    res.json({ ok: true, config: maskEmailConfig(result.rows[0], tenantId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/email/test', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getEmailConfigTenantId(req);
+    if (!canManageEmailConfig(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Email configuration access denied' });
+    }
+    const delivery = await sendMailWithConfig({
+      tenantId,
+      to: cleanString(req.body?.to) || req.user.email,
+      subject: 'Octave CRM email test',
+      text: 'Your Octave CRM email configuration is working.',
+      html: '<p>Your Octave CRM email configuration is working.</p>'
+    });
+    res.status(delivery.sent ? 200 : 400).json({ ok: delivery.sent, delivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/settings/profile', requireAuth, async (req, res, next) => {
+  try {
+    const tenantLogoUrl = cleanString(req.body?.tenantLogoUrl);
+    const avatarUrl = cleanString(req.body?.avatarUrl);
+    const tenantId = getScopedTenantId(req);
+    if (tenantLogoUrl && !canManageTenantUsers(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can update the company logo' });
+    }
+    if (tenantLogoUrl) await pool.query('update tenants set logo_url = $2 where id = $1', [tenantId, tenantLogoUrl]);
+    if (avatarUrl) await pool.query('update app_users set avatar_url = $2, updated_at = now() where id = $1', [req.user.id, avatarUrl]);
+    const refreshed = await loadUserById(req.user.id);
+    res.json({ ok: true, user: refreshed });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, next) => {
+  const tenantId = req.body?.tenantId || defaultTenantId;
+  try {
+    const model = cleanString(req.body?.model) || await pickDefaultModel();
+    const templates = [
+      ['Campaign Strategist', 'Planning', 0.4, ['Market research', 'Audience map', 'Budget split'], 'You are a marketing campaign strategist. Create concise plans for human approval.'],
+      ['Social Copywriter', 'Content', 0.7, ['Caption draft', 'Hashtag set', 'Tone rewrite'], 'You write clear social media copy for human approval.'],
+      ['Lead Nurture Agent', 'Follow-up', 0.3, ['Email sequence', 'CRM notes', 'Follow-up tasks'], 'You create sales follow-up drafts and CRM notes for human approval.'],
+      ['Approval Guard', 'Governance', 0.2, ['Risk review', 'Policy check'], 'You review AI outputs for risks before a human decides.']
+    ];
+    for (const [name, type, temperature, tools, systemPrompt] of templates) {
+      await pool.query(
+        `insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
+         select $1,$2,$3,$4,$5,'Human approval before execution','Ready',$6,$7
+          where not exists (
+            select 1 from ai_agents where tenant_id = $1 and name = $2
+          )`,
+        [tenantId, name, type, model, temperature, tools, systemPrompt]
+      );
+    }
+    const result = await pool.query(
+      `select id, tenant_id as "tenantId", name, type, model, temperature, approval_rule as "approvalRule",
+              status, tools, system_prompt as "systemPrompt"
+         from ai_agents
+        where tenant_id = $1
+        order by created_at`,
+      [tenantId]
+    );
+    res.json({ ok: true, tenantId, model, agents: result.rows });
   } catch (error) {
     next(error);
   }
@@ -611,7 +756,8 @@ async function requireAuth(req, res, next) {
     if (!payload) return res.status(401).json({ ok: false, error: 'Authentication required' });
     const result = await pool.query(
       `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
-              u.team, u.initials, u.is_active, t.name as tenant_name, t.plan, t.status as tenant_status
+              u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+              t.status as tenant_status, t.logo_url as tenant_logo_url
          from app_users u
          join tenants t on t.id = u.tenant_id
         where u.id = $1`,
@@ -669,6 +815,8 @@ async function ensureSchema() {
     alter table app_users add column if not exists platform_role text not null default 'tenant_user';
     alter table app_users add column if not exists is_active boolean not null default true;
     alter table app_users add column if not exists updated_at timestamptz not null default now();
+    alter table tenants add column if not exists logo_url text;
+    alter table app_users add column if not exists avatar_url text;
     create table if not exists social_accounts (
       id uuid primary key default gen_random_uuid(),
       tenant_id text not null references tenants(id) on delete cascade,
@@ -680,6 +828,20 @@ async function ensureSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (tenant_id, platform)
+    );
+    create table if not exists email_configs (
+      tenant_id text primary key,
+      smtp_host text,
+      smtp_port integer not null default 587,
+      smtp_secure boolean not null default false,
+      smtp_user text,
+      smtp_pass text,
+      from_email text,
+      from_name text,
+      enabled boolean not null default false,
+      updated_by uuid references app_users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     );
   `);
 
@@ -817,16 +979,131 @@ async function createApproval({ tenantId, title, sourceAgentId, risk, prompt, ou
   return result.rows[0];
 }
 
-async function createUser(client, { tenantId, name, email, password, role, platformRole, team }) {
+async function createUser(client, { tenantId, name, email, password, role, platformRole, team, avatarUrl }) {
   if (!tenantId || !name || !email || !password) throw new Error('tenantId, name, email, and password are required');
   const result = await client.query(
-    `insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)
+    `insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials, avatar_url)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      returning id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-               team, initials, is_active as "isActive", created_at as "createdAt"`,
-    [tenantId, name, email, hashPassword(password), role, platformRole, team || null, initialsFor(name)]
+               team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"`,
+    [tenantId, name, email, hashPassword(password), role, platformRole, team || null, initialsFor(name), avatarUrl || null]
   );
   return result.rows[0];
+}
+
+async function loadUserById(id) {
+  const result = await pool.query(
+    `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
+            u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+            t.status as tenant_status, t.logo_url as tenant_logo_url
+       from app_users u
+       join tenants t on t.id = u.tenant_id
+      where u.id = $1`,
+    [id]
+  );
+  return result.rowCount ? toSafeUser(result.rows[0]) : null;
+}
+
+async function pickDefaultModel() {
+  const tags = await getOllamaTags();
+  return tags.models?.[0]?.name || process.env.DEFAULT_OLLAMA_MODEL || 'llama3.1:8b';
+}
+
+function getEmailConfigTenantId(req) {
+  if (isPlatformAdmin(req.user)) return req.query.tenantId || req.body?.tenantId || null;
+  return req.user.tenantId;
+}
+
+function canManageEmailConfig(user, tenantId) {
+  if (isPlatformAdmin(user)) return true;
+  return tenantId === user.tenantId && user.platformRole === 'tenant_admin';
+}
+
+function normalizeEmailConfig(input = {}) {
+  return {
+    smtpHost: cleanString(input.smtpHost),
+    smtpPort: Number(input.smtpPort || 587),
+    smtpSecure: Boolean(input.smtpSecure),
+    smtpUser: cleanString(input.smtpUser),
+    smtpPass: cleanString(input.smtpPass),
+    fromEmail: cleanString(input.fromEmail),
+    fromName: cleanString(input.fromName) || 'Octave CRM',
+    enabled: Boolean(input.enabled)
+  };
+}
+
+function maskEmailConfig(config, tenantId) {
+  return {
+    tenantId,
+    smtpHost: config?.smtpHost || '',
+    smtpPort: config?.smtpPort || 587,
+    smtpSecure: Boolean(config?.smtpSecure),
+    smtpUser: config?.smtpUser || '',
+    fromEmail: config?.fromEmail || '',
+    fromName: config?.fromName || 'Octave CRM',
+    enabled: Boolean(config?.enabled),
+    hasPassword: Boolean(config?.smtpPass)
+  };
+}
+
+async function getEmailConfig(tenantId) {
+  const key = tenantId || '__platform__';
+  const result = await pool.query(
+    `select tenant_id as "tenantId", smtp_host as "smtpHost", smtp_port as "smtpPort",
+            smtp_secure as "smtpSecure", smtp_user as "smtpUser", smtp_pass as "smtpPass",
+            from_email as "fromEmail", from_name as "fromName", enabled
+       from email_configs
+      where tenant_id = $1`,
+    [key]
+  );
+  return result.rows[0] || null;
+}
+
+async function getBestEmailConfig(tenantId) {
+  return await getEmailConfig(tenantId) || await getEmailConfig(null);
+}
+
+async function sendCredentialEmail({ tenantId, to, name, email, password, createdBy, tenant }) {
+  const subject = `Your Octave CRM login for ${tenant?.name || 'Octave CRM'}`;
+  const loginUrl = process.env.PUBLIC_APP_URL || 'http://38.247.188.228:3002';
+  const text = [
+    `Hello ${name || ''},`,
+    '',
+    `${createdBy?.name || 'An administrator'} created your Octave CRM account.`,
+    `Company: ${tenant?.name || 'Octave CRM'}`,
+    `Login URL: ${loginUrl}`,
+    `Email: ${email}`,
+    `Temporary password: ${password}`,
+    '',
+    'Please sign in and change your password from Settings.'
+  ].join('\n');
+  const html = `<p>Hello ${escapeHtml(name || '')},</p><p>${escapeHtml(createdBy?.name || 'An administrator')} created your Octave CRM account.</p><p><strong>Company:</strong> ${escapeHtml(tenant?.name || 'Octave CRM')}<br/><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a><br/><strong>Email:</strong> ${escapeHtml(email)}<br/><strong>Temporary password:</strong> ${escapeHtml(password)}</p><p>Please sign in and change your password from Settings.</p>`;
+  return sendMailWithConfig({ tenantId, to, subject, text, html });
+}
+
+async function sendMailWithConfig({ tenantId, to, subject, text, html }) {
+  const config = await getBestEmailConfig(tenantId);
+  if (!config?.enabled || !config.smtpHost || !config.fromEmail) {
+    return { sent: false, skipped: true, reason: 'email configuration is not enabled' };
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host: config.smtpHost,
+      port: Number(config.smtpPort || 587),
+      secure: Boolean(config.smtpSecure),
+      auth: config.smtpUser ? { user: config.smtpUser, pass: config.smtpPass || '' } : undefined
+    });
+    const info = await transporter.sendMail({
+      from: `"${config.fromName || 'Octave CRM'}" <${config.fromEmail}>`,
+      to,
+      subject,
+      text,
+      html
+    });
+    return { sent: true, messageId: info.messageId };
+  } catch (error) {
+    return { sent: false, error: error.message };
+  }
 }
 
 function normalizeAgent(input = {}) {
@@ -872,11 +1149,13 @@ function toSafeUser(row) {
     platformRole: row.platform_role,
     team: row.team,
     initials: row.initials || initialsFor(row.name),
+    avatarUrl: row.avatar_url,
     tenant: {
       id: row.tenant_id,
       name: row.tenant_name,
       plan: row.plan,
-      status: row.tenant_status
+      status: row.tenant_status,
+      logoUrl: row.tenant_logo_url
     }
   };
 }
@@ -955,6 +1234,15 @@ function initialsFor(name = '') {
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : value;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
 async function safeJson(response) {

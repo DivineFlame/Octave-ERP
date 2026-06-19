@@ -5,6 +5,7 @@ create table if not exists tenants (
   name text not null,
   plan text not null default 'Starter',
   status text not null default 'Active',
+  logo_url text,
   created_at timestamptz not null default now()
 );
 
@@ -18,6 +19,7 @@ create table if not exists app_users (
   platform_role text not null default 'tenant_user',
   team text,
   initials text,
+  avatar_url text,
   is_active boolean not null default true,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
@@ -27,6 +29,8 @@ alter table app_users add column if not exists password_hash text;
 alter table app_users add column if not exists platform_role text not null default 'tenant_user';
 alter table app_users add column if not exists is_active boolean not null default true;
 alter table app_users add column if not exists updated_at timestamptz not null default now();
+alter table tenants add column if not exists logo_url text;
+alter table app_users add column if not exists avatar_url text;
 
 create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
@@ -121,6 +125,21 @@ create table if not exists social_accounts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (tenant_id, platform)
+);
+
+create table if not exists email_configs (
+  tenant_id text primary key,
+  smtp_host text,
+  smtp_port integer not null default 587,
+  smtp_secure boolean not null default false,
+  smtp_user text,
+  smtp_pass text,
+  from_email text,
+  from_name text,
+  enabled boolean not null default false,
+  updated_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 insert into tenants (id, name, plan, status)

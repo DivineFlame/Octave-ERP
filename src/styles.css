@@ -130,7 +130,7 @@ p, small, .muted { color: var(--muted); }
 }
 
 .brand { gap: 10px; min-height: 40px; }
-.brandMark, .avatar, .metricIcon, .leadScore, .time, .agentTop > span {
+.brandMark, .brandLogo, .avatar, .avatarImage, .metricIcon, .leadScore, .time, .agentTop > span {
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -142,6 +142,13 @@ p, small, .muted { color: var(--muted); }
   background: #35a489;
   color: white;
   font-weight: 800;
+}
+
+.brandLogo {
+  width: 38px;
+  height: 38px;
+  object-fit: cover;
+  background: white;
 }
 
 .brand span, .approvalPanel span {
@@ -256,6 +263,12 @@ p, small, .muted { color: var(--muted); }
   color: var(--green);
   font-size: 12px;
   font-weight: 800;
+}
+
+.avatarImage {
+  width: 26px;
+  height: 26px;
+  object-fit: cover;
 }
 
 .heroBand {
@@ -743,6 +756,17 @@ p, small, .muted { color: var(--muted); }
   gap: 6px;
   color: #40515a;
   font-weight: 700;
+}
+
+.passwordPanel .checkLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.passwordPanel .checkLine input {
+  width: auto;
+  min-height: auto;
 }
 
 .passwordPanel input {

@@ -54,6 +54,8 @@ Tenant user: karan@example.com / User@12345
 
 Only the platform admin can create, restrict, or delete companies and configure Paperclip/Ollama AI agents. As a standard operating boundary, the platform admin does not see tenant workspace modules such as Marketing, Leads, Follow-ups, Customers, or approval queues. Tenant admins can create users, reset their tenant users' passwords, and configure tenant social handles. Tenant users can sign in only to their assigned tenant workspace and can change their own password from Settings.
 
+The login screen does not expose seed credentials. Configure platform email in Settings before creating production tenants so tenant admin credentials can be sent from the platform admin email. Tenant admins can configure tenant email in Settings so newly created tenant users receive credentials from the tenant email identity.
+
 ## Server Port Plan
 
 For a direct host-port setup, use these mappings:
@@ -129,6 +131,9 @@ This repository currently ships:
 - Self-service password changes and tenant-admin user password reset
 - Tenant-scoped social media handles and credential storage for agent access
 - Platform-admin separation from tenant operational modules and approval queues
+- Bundled platform logo, tenant logo URL, and user avatar URL support
+- Platform and tenant SMTP configuration with credential email delivery
+- One-click agentic framework activation for default Paperclip/Ollama agents
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -148,6 +153,10 @@ The included API service exposes:
 - `GET /api/admin/users`
 - `POST /api/admin/users`
 - `POST /api/admin/users/:id/password`
+- `GET /api/email/config`
+- `PUT /api/email/config`
+- `POST /api/email/test`
+- `PATCH /api/settings/profile`
 - `GET /api/social/accounts`
 - `POST /api/social/accounts`
 - `DELETE /api/social/accounts/:id`
@@ -160,6 +169,7 @@ The included API service exposes:
 - `POST /api/ai/agents`
 - `PUT /api/ai/agents/:id`
 - `POST /api/ai/agents/:id/run`
+- `POST /api/ai/framework/activate`
 - `GET /api/paperclip/status`
 - `GET /api/paperclip/models`
 - `POST /api/paperclip/tasks`

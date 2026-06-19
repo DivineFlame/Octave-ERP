@@ -97,12 +97,6 @@ function LoginPage({ onLogin }) {
         <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         {error && <div className="errorBox">{error}</div>}
         <button className="primaryButton" type="submit"><KeyRound size={16} /> Login</button>
-        <div className="credentialBox">
-          <strong>Initial credentials</strong>
-          <span>Platform admin: admin@octave.local / Admin@12345</span>
-          <span>Tenant admin: ananya@example.com / Tenant@12345</span>
-          <span>Tenant user: karan@example.com / User@12345</span>
-        </div>
       </form>
     </main>
   );
@@ -126,7 +120,7 @@ function Workspace({ session, onLogout }) {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><div className="brandMark">O</div><div><strong>Octave CRM</strong><span>{isAdmin ? 'Platform admin' : session.user.role}</span></div></div>
+        <BrandBlock isAdmin={isAdmin} tenant={tenant} role={session.user.role} />
         <nav className="navList">{nav.map(([label, Icon]) => <button className={view === label ? 'navItem active' : 'navItem'} key={label} onClick={() => setView(label)}><Icon size={18} /><span>{label}</span></button>)}</nav>
         <div className="approvalPanel"><ShieldCheck size={20} /><div><strong>Human approval</strong><span>Required before execution</span></div></div>
       </aside>
@@ -141,7 +135,7 @@ function Workspace({ session, onLogout }) {
         {!isAdmin && view === 'Follow-ups' && <FollowUps />}
         {!isAdmin && view === 'Customers' && <Customers tenant={tenant} />}
         {view === 'AI Agents' && <AgentAdmin tenantId={tenantId} isAdmin={isAdmin} />}
-        {view === 'Settings' && <Settings tenant={tenant} user={session.user} systemStatus={systemStatus} />}
+        {view === 'Settings' && <Settings tenant={tenant} user={session.user} systemStatus={systemStatus} tenantId={tenantId} canManageEmail={canManageTenant} canManageTenantBrand={!isAdmin && canManageTenant} isPlatformAdmin={isAdmin} />}
       </section>
     </main>
   );
@@ -151,9 +145,14 @@ function Topbar({ user, tenants, tenantId, setTenantId, onLogout, isAdmin }) {
   return <header className="topbar">
     <div className="tenantSelect"><Building2 size={18} /><select disabled={!isAdmin} value={tenantId} onChange={(event) => setTenantId(event.target.value)}>{tenants.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
     <div className="searchBox"><Search size={17} /><input placeholder={isAdmin ? 'Search companies and users' : 'Search campaigns, leads, customers'} /></div>
-    <div className="userSelect"><span className="avatar">{user.initials}</span><strong>{user.name}</strong></div>
+    <div className="userSelect">{user.avatarUrl ? <img className="avatarImage" src={user.avatarUrl} alt="" /> : <span className="avatar">{user.initials}</span>}<strong>{user.name}</strong></div>
     <button className="iconTextButton" onClick={onLogout}><LogOut size={16} /> Logout</button>
   </header>;
+}
+
+function BrandBlock({ isAdmin, tenant, role }) {
+  const logo = isAdmin ? '/octave-logo.jpeg' : tenant.logoUrl;
+  return <div className="brand">{logo ? <img className="brandLogo" src={logo} alt="" /> : <div className="brandMark">O</div>}<div><strong>{isAdmin ? 'Octave CRM' : tenant.name}</strong><span>{isAdmin ? 'Platform admin' : role}</span></div></div>;
 }
 
 function Hero({ tenant }) {
@@ -174,8 +173,8 @@ function Stats({ systemStatus }) {
 }
 
 function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAdmin }) {
-  const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
-  const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing' });
+  const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '' });
   const [passwordForm, setPasswordForm] = useState({ userId: '', newPassword: 'User@12345' });
   const [socialForm, setSocialForm] = useState({ platform: 'Instagram', handle: '', accessToken: '', appId: '', appSecret: '', pageId: '', status: 'Active' });
   const [users, setUsers] = useState([]);
@@ -200,8 +199,8 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     const result = await api('/api/admin/tenants', { method: 'POST', body: JSON.stringify(tenantForm) });
     setTenants([result.tenant, ...tenants]);
     setTenantId(result.tenant.id);
-    setTenantForm({ name: '', plan: 'Starter', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
-    setMessage(`Created ${result.tenant.name}`);
+    setTenantForm({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
+    setMessage(`Created ${result.tenant.name}. Email ${deliveryText(result.emailDelivery)}`);
   }
 
   async function createUser(event) {
@@ -209,8 +208,8 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     setMessage('');
     const result = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ ...userForm, tenantId }) });
     setUsers([result.user, ...users]);
-    setUserForm({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing' });
-    setMessage(`Created user ${result.user.email}`);
+    setUserForm({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '' });
+    setMessage(`Created user ${result.user.email}. Email ${deliveryText(result.emailDelivery)}`);
   }
 
   async function setTenantStatus(id, status) {
@@ -272,6 +271,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <h3>Create Company</h3>
           <label>Company name<input value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} required /></label>
           <label>Plan<select value={tenantForm.plan} onChange={(event) => setTenantForm({ ...tenantForm, plan: event.target.value })}><option>Starter</option><option>Growth</option><option>Scale</option></select></label>
+          <label>Company logo URL<input value={tenantForm.logoUrl} onChange={(event) => setTenantForm({ ...tenantForm, logoUrl: event.target.value })} placeholder="https://..." /></label>
           <label>Tenant admin name<input value={tenantForm.adminName} onChange={(event) => setTenantForm({ ...tenantForm, adminName: event.target.value })} /></label>
           <label>Tenant admin email<input value={tenantForm.adminEmail} onChange={(event) => setTenantForm({ ...tenantForm, adminEmail: event.target.value })} /></label>
           <label>Tenant admin password<input value={tenantForm.adminPassword} onChange={(event) => setTenantForm({ ...tenantForm, adminPassword: event.target.value })} /></label>
@@ -284,6 +284,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>Password<input value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} required /></label>
           <label>Access<select value={userForm.platformRole} onChange={(event) => setUserForm({ ...userForm, platformRole: event.target.value, role: event.target.selectedOptions[0].text })}><option value="tenant_user">Tenant User</option><option value="tenant_admin">Tenant Admin</option><option value="approver">Approver</option></select></label>
           <label>Team<input value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })} /></label>
+          <label>Avatar URL<input value={userForm.avatarUrl} onChange={(event) => setUserForm({ ...userForm, avatarUrl: event.target.value })} placeholder="https://..." /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create user</button>
         </form>
         <form className="agentForm" onSubmit={changeUserPassword}>
@@ -383,6 +384,17 @@ function AgentAdmin({ tenantId, isAdmin }) {
     setStatus('AI agent configuration saved by platform admin');
   }
 
+  async function activateFramework() {
+    setStatus('Activating agentic framework...');
+    try {
+      const result = await api('/api/ai/framework/activate', { method: 'POST', body: JSON.stringify({ tenantId, model: selectedModel }) });
+      setAgents(result.agents || []);
+      setStatus(`Agentic framework active with ${result.agents?.length || 0} agent(s) on ${result.model}`);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
   async function testOllama() {
     setOutput('Running test prompt...');
     try {
@@ -412,7 +424,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
         <label>Tools<input value={agentForm.tools} onChange={(event) => setAgentForm({ ...agentForm, tools: event.target.value })} /></label>
         <label>System prompt<textarea rows="4" value={agentForm.systemPrompt} onChange={(event) => setAgentForm({ ...agentForm, systemPrompt: event.target.value })} /></label>
         <label>Test prompt<textarea rows="4" value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
-        <div className="formActions"><button className="secondaryButton" type="button" onClick={testOllama}><SlidersHorizontal size={16} /> Test Ollama</button><button className="primaryButton" type="submit"><Check size={16} /> Save agent</button></div>
+        <div className="formActions"><button className="secondaryButton" type="button" onClick={activateFramework}><Bot size={16} /> Activate framework</button><button className="secondaryButton" type="button" onClick={testOllama}><SlidersHorizontal size={16} /> Test Ollama</button><button className="primaryButton" type="submit"><Check size={16} /> Save agent</button></div>
         <div className="responseBox">{output || 'Paperclip and Ollama output will appear here.'}</div>
       </form>}
       <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
@@ -420,8 +432,8 @@ function AgentAdmin({ tenantId, isAdmin }) {
   </Panel></section>;
 }
 
-function Settings({ tenant, user, systemStatus }) {
-  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><PasswordPanel /></div></Panel></section>;
+function Settings({ tenant, user, systemStatus, tenantId, canManageEmail, canManageTenantBrand, isPlatformAdmin }) {
+  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><PasswordPanel /><ProfilePanel tenant={tenant} user={user} canManageTenant={canManageTenantBrand} /><EmailConfigPanel tenantId={tenantId} canManageEmail={canManageEmail} isPlatformAdmin={isPlatformAdmin} /></div></Panel></section>;
 }
 
 function PasswordPanel() {
@@ -446,6 +458,79 @@ function PasswordPanel() {
     <label>New password<input type="password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} required /></label>
     {message && <small>{message}</small>}
     <button className="primaryButton" type="submit"><KeyRound size={16} /> Change password</button>
+  </form>;
+}
+
+function ProfilePanel({ tenant, user, canManageTenant }) {
+  const [form, setForm] = useState({ tenantLogoUrl: tenant.logoUrl || '', avatarUrl: user.avatarUrl || '' });
+  const [message, setMessage] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setMessage('');
+    try {
+      await api('/api/settings/profile', { method: 'PATCH', body: JSON.stringify({ tenantLogoUrl: canManageTenant ? form.tenantLogoUrl : '', avatarUrl: form.avatarUrl }) });
+      setMessage('Branding saved. Refresh to see it everywhere.');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return <form className="settingsList passwordPanel" onSubmit={submit}>
+    <h3>Logo & Avatar</h3>
+    {canManageTenant && <label>Company logo URL<input value={form.tenantLogoUrl} onChange={(event) => setForm({ ...form, tenantLogoUrl: event.target.value })} placeholder="https://..." /></label>}
+    <label>Your avatar URL<input value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} placeholder="https://..." /></label>
+    {message && <small>{message}</small>}
+    <button className="primaryButton" type="submit"><Check size={16} /> Save branding</button>
+  </form>;
+}
+
+function EmailConfigPanel({ tenantId, canManageEmail, isPlatformAdmin }) {
+  const [form, setForm] = useState({ enabled: false, smtpHost: '', smtpPort: 587, smtpSecure: false, smtpUser: '', smtpPass: '', fromEmail: '', fromName: 'Octave CRM' });
+  const [message, setMessage] = useState('');
+  const [testTo, setTestTo] = useState('');
+
+  useEffect(() => {
+    if (!canManageEmail) return;
+    api(`/api/email/config${isPlatformAdmin ? '' : `?tenantId=${tenantId}`}`).then((result) => setForm({ ...form, ...result.config, smtpPass: '' })).catch((error) => setMessage(error.message));
+  }, [tenantId, canManageEmail, isPlatformAdmin]);
+
+  if (!canManageEmail) return null;
+
+  async function save(event) {
+    event.preventDefault();
+    setMessage('');
+    try {
+      await api('/api/email/config', { method: 'PUT', body: JSON.stringify({ ...form, tenantId: isPlatformAdmin ? null : tenantId }) });
+      setMessage('Email configuration saved');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function sendTest() {
+    setMessage('Sending test email...');
+    try {
+      const result = await api('/api/email/test', { method: 'POST', body: JSON.stringify({ tenantId: isPlatformAdmin ? null : tenantId, to: testTo }) });
+      setMessage(result.delivery?.sent ? 'Test email sent' : result.delivery?.reason || result.delivery?.error || 'Email test failed');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return <form className="settingsList passwordPanel" onSubmit={save}>
+    <h3>{isPlatformAdmin ? 'Platform Email' : 'Tenant Email'}</h3>
+    <label className="checkLine"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /> Enable credential emails</label>
+    <label>SMTP host<input value={form.smtpHost} onChange={(event) => setForm({ ...form, smtpHost: event.target.value })} placeholder="smtp.example.com" /></label>
+    <label>SMTP port<input type="number" value={form.smtpPort} onChange={(event) => setForm({ ...form, smtpPort: event.target.value })} /></label>
+    <label className="checkLine"><input type="checkbox" checked={form.smtpSecure} onChange={(event) => setForm({ ...form, smtpSecure: event.target.checked })} /> Use SSL/TLS</label>
+    <label>SMTP user<input value={form.smtpUser} onChange={(event) => setForm({ ...form, smtpUser: event.target.value })} /></label>
+    <label>SMTP password<input type="password" value={form.smtpPass} onChange={(event) => setForm({ ...form, smtpPass: event.target.value })} placeholder={form.hasPassword ? 'Saved password unchanged' : ''} /></label>
+    <label>From email<input value={form.fromEmail} onChange={(event) => setForm({ ...form, fromEmail: event.target.value })} /></label>
+    <label>From name<input value={form.fromName} onChange={(event) => setForm({ ...form, fromName: event.target.value })} /></label>
+    <label>Test recipient<input value={testTo} onChange={(event) => setTestTo(event.target.value)} placeholder="name@example.com" /></label>
+    {message && <small>{message}</small>}
+    <div className="formActions"><button className="secondaryButton" type="button" onClick={sendTest}><Send size={16} /> Test</button><button className="primaryButton" type="submit"><Check size={16} /> Save email</button></div>
   </form>;
 }
 
@@ -476,6 +561,13 @@ function Metric({ icon: Icon, label, value, delta }) {
 }
 function PanelHeader({ icon: Icon, title, action }) {
   return <div className="panelHeader"><div><Icon size={18} /><h2>{title}</h2></div><button><Plus size={16} /><span>{action}</span></button></div>;
+}
+
+function deliveryText(delivery) {
+  if (delivery?.sent) return 'sent.';
+  if (delivery?.skipped) return `skipped: ${delivery.reason}.`;
+  if (delivery?.error) return `failed: ${delivery.error}.`;
+  return 'not sent.';
 }
 
 createRoot(document.getElementById('root')).render(<App />);
