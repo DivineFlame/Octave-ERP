@@ -29,17 +29,18 @@ npm run build
 
 ## Dokploy Deployment
 
-Use the included `Dockerfile` or `docker-compose.yml` in Dokploy.
+Use the included `docker-compose.yml` in Dokploy for the full stack.
 
 Recommended Dokploy setup:
 
 1. Create a new application from this GitHub repository.
-2. Select Dockerfile deployment.
-3. Set the exposed container port to `80`.
-4. Keep the health check path as `/health`.
-5. Add domain and SSL settings in Dokploy.
+2. Select Compose deployment.
+3. Use project name `Octave CRM`.
+4. Keep the web service/container name as `App`.
+5. Add environment variables from `dokploy.env.example`.
+6. Deploy and open `http://38.247.188.228:3002/`.
 
-The app is a static React/Vite build served by nginx. API requests under `/api` are proxied to the backend API container.
+The app is a static React/Vite build served by nginx. Nginx proxies `/api` to the backend service, so the browser does not need direct access to the API port.
 
 ## Server Port Plan
 
@@ -49,23 +50,49 @@ For a direct host-port setup, use these mappings:
 - Ollama/Open WebUI: `3001:80`
 - Octave CRM web GUI: `3002:80`
 - Paperclip server: `3100:80`
-- Octave CRM API: `3200:3000`
+- Backend API: `3200:3000`
 - Ollama API: `11434:11434`
 
 The included compose file maps Octave CRM to `3002:80`, Paperclip to `3100:80`, the API to `3200:3000`, and Ollama to `11434:11434`. Dokploy itself should be installed separately and mapped to `3000:80`. Ollama/Open WebUI should keep using `3001:80`.
 
 In Dokploy, this app is expected to sit under project `Octave CRM` with the app/container name `App`. The compose service is therefore named `app` and uses `container_name: App`.
 
-Set the Paperclip image and service credentials through environment variables:
+The repository includes a lightweight Paperclip-compatible orchestration service in `paperclip/`, so no external `paperclip:latest` image is required.
+
+Set production variables in Dokploy:
 
 ```bash
-PAPERCLIP_IMAGE=your-paperclip-image:latest
-PAPERCLIP_BASE_URL=http://paperclip
-OLLAMA_BASE_URL=http://ollama:11434
-POSTGRES_USER=octave
-POSTGRES_PASSWORD=change_me
-POSTGRES_DB=octave_crm
+PUBLIC_APP_URL=http://38.247.188.228:3002
+CORS_ORIGIN=http://38.247.188.228:3002
+POSTGRES_PASSWORD=change_this_strong_password
+DEFAULT_OLLAMA_MODEL=llama3.1:8b
+VITE_API_BASE_URL=
 ```
+
+After the stack starts, pull at least one Ollama model:
+
+```bash
+docker exec -it ollama ollama pull llama3.1:8b
+```
+
+If the server is small, choose a lighter model and update `DEFAULT_OLLAMA_MODEL`, for example:
+
+```bash
+docker exec -it ollama ollama pull llama3.2:3b
+```
+
+## Server Health Checks
+
+Use these checks after Dokploy deploys the stack:
+
+```bash
+curl http://38.247.188.228:3002/health
+curl http://38.247.188.228:3002/api/system/status
+curl http://38.247.188.228:3200/health
+curl http://38.247.188.228:3100/health
+```
+
+If `http://38.247.188.228:3002/` refuses the connection, the `App` container is not running or Dokploy has not published `3002:80`.
 
 ## Production Scope
 
@@ -80,8 +107,8 @@ This repository currently ships:
 - Human approval and audit-oriented workflow surfaces
 - Backend API service
 - PostgreSQL schema and seed data
-- Ollama status, model discovery, and test-prompt endpoints
-- Paperclip task orchestration endpoint
+- Ollama status, model discovery, model pull, and test-prompt endpoints
+- Paperclip-compatible local orchestration service
 - Approval queue persistence and approve/reject endpoint
 - Dokploy-compatible Docker/nginx deployment
 
@@ -95,6 +122,7 @@ The included API service exposes:
 - `GET /api/ai/ollama/status`
 - `GET /api/ai/ollama/models`
 - `POST /api/ai/ollama/test`
+- `POST /api/ai/ollama/pull`
 - `GET /api/ai/agents`
 - `POST /api/ai/agents`
 - `PUT /api/ai/agents/:id`
@@ -104,5 +132,6 @@ The included API service exposes:
 - `GET /api/approvals`
 - `POST /api/approvals`
 - `PATCH /api/approvals/:id`
+- `GET /api/system/status`
 
 PostgreSQL schema and seed data live in `db/init/001_schema.sql`.
