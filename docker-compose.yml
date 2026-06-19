@@ -1,0 +1,9 @@
+services:
+  octave-crm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: octave-crm
+    restart: unless-stopped
+    ports:
+      - "8080:80"
