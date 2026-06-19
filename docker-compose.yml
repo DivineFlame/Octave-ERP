@@ -1,9 +1,9 @@
 services:
-  octave-crm:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: octave-crm
+    container_name: App
     restart: unless-stopped
     ports:
       - "3002:80"
