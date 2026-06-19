@@ -6,4 +6,13 @@ services:
     container_name: octave-crm
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "3001:80"
+
+  paperclip:
+    image: ${PAPERCLIP_IMAGE:-paperclip:latest}
+    container_name: paperclip
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    ports:
+      - "3100:80"
