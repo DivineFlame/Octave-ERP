@@ -123,7 +123,7 @@ This repository currently ships:
 - Backend API service
 - PostgreSQL schema and seed data
 - Ollama status, model discovery, model pull, and test-prompt endpoints
-- Paperclip-compatible local orchestration service
+- Paperclip-compatible local orchestration service mapped to installed Ollama models
 - Approval queue persistence and approve/reject endpoint
 - Dokploy-compatible Docker/nginx deployment
 
@@ -142,6 +142,7 @@ The included API service exposes:
 - `POST /api/admin/users`
 - `GET /api/ai/ollama/status`
 - `GET /api/ai/ollama/models`
+- `GET /api/ai/ollama/installed`
 - `POST /api/ai/ollama/test`
 - `POST /api/ai/ollama/pull`
 - `GET /api/ai/agents`
@@ -149,6 +150,7 @@ The included API service exposes:
 - `PUT /api/ai/agents/:id`
 - `POST /api/ai/agents/:id/run`
 - `GET /api/paperclip/status`
+- `GET /api/paperclip/models`
 - `POST /api/paperclip/tasks`
 - `GET /api/approvals`
 - `POST /api/approvals`

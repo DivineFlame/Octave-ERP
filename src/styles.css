@@ -619,6 +619,12 @@ p, small, .muted { color: var(--muted); }
 }
 
 .formActions { flex-wrap: wrap; gap: 7px; margin-top: 2px; }
+.inlineField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
 .agentCard { padding: 11px; }
 .adminList {
   max-height: 560px;

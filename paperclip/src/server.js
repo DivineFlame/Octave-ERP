@@ -7,18 +7,44 @@ const defaultModel = process.env.DEFAULT_MODEL || 'llama3.1:8b';
 
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'octave-paperclip', ollamaBaseUrl });
+app.get('/health', async (_req, res) => {
+  const models = await getOllamaModels();
+  res.json({
+    ok: true,
+    service: 'octave-paperclip',
+    ollamaBaseUrl,
+    defaultModel,
+    ollama: models
+  });
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'octave-paperclip', ollamaBaseUrl });
+app.get('/api/health', async (_req, res) => {
+  const models = await getOllamaModels();
+  res.json({
+    ok: true,
+    service: 'octave-paperclip',
+    ollamaBaseUrl,
+    defaultModel,
+    ollama: models
+  });
+});
+
+app.get('/api/models', async (_req, res) => {
+  const result = await getOllamaModels();
+  res.status(result.ok ? 200 : 502).json({
+    ok: result.ok,
+    defaultModel,
+    ollamaBaseUrl,
+    models: result.models || [],
+    count: result.models?.length || 0,
+    error: result.error
+  });
 });
 
 app.post('/api/tasks', async (req, res) => {
   const body = req.body || {};
   const prompt = body.prompt || body.input?.prompt || body.input?.content || buildPrompt(body);
-  const model = body.agent?.model || body.model || defaultModel;
+  const model = body.agent?.model || body.model || body.input?.model || defaultModel;
 
   const result = await runOllama(model, prompt, body.agent?.temperature);
   if (result.ok) {
@@ -61,6 +87,24 @@ async function runOllama(model, prompt, temperature = 0.4) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: payload.error || `HTTP ${response.status}` };
     return { ok: true, output: payload.response || '' };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+async function getOllamaModels() {
+  try {
+    const response = await fetch(`${ollamaBaseUrl}/api/tags`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: payload.error || `HTTP ${response.status}` };
+    return {
+      ok: true,
+      models: (payload.models || []).map((model) => ({
+        name: model.name,
+        modifiedAt: model.modified_at,
+        size: model.size
+      }))
+    };
   } catch (error) {
     return { ok: false, error: error.message };
   }

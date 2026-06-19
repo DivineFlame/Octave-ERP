@@ -259,20 +259,40 @@ function AgentAdmin({ tenantId, isAdmin }) {
   const [status, setStatus] = useState('Checking Paperclip and Ollama...');
   const [prompt, setPrompt] = useState('Write a three-line campaign idea for a wellness webinar.');
   const [output, setOutput] = useState('');
+  const [modelToFetch, setModelToFetch] = useState('llama3.2:3b');
+  const [paperclipModels, setPaperclipModels] = useState([]);
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
   const selectedModel = agentForm.model || models[0]?.name || 'llama3.1:8b';
 
   useEffect(() => { refresh(); }, [tenantId]);
 
   async function refresh() {
-    const [agentsResult, modelsResult, paperclipResult] = await Promise.allSettled([
+    const [agentsResult, modelsResult, paperclipResult, paperclipModelsResult] = await Promise.allSettled([
       api(`/api/ai/agents?tenantId=${tenantId}`),
-      api('/api/ai/ollama/models'),
-      api('/api/paperclip/status')
+      api('/api/ai/ollama/installed'),
+      api('/api/paperclip/status'),
+      api('/api/paperclip/models')
     ]);
     if (agentsResult.status === 'fulfilled') setAgents(agentsResult.value.agents || []);
-    if (modelsResult.status === 'fulfilled') setModels(modelsResult.value.models || []);
+    if (modelsResult.status === 'fulfilled') setModels(modelsResult.value.installed || modelsResult.value.models || []);
+    if (paperclipModelsResult.status === 'fulfilled') setPaperclipModels(paperclipModelsResult.value.models || []);
     setStatus(paperclipResult.status === 'fulfilled' && paperclipResult.value.ok ? 'Paperclip connected' : `Paperclip unavailable: ${paperclipResult.reason?.message || paperclipResult.value?.error || 'check container logs'}`);
+  }
+
+  async function fetchModel() {
+    if (!modelToFetch.trim()) return;
+    setStatus(`Fetching ${modelToFetch} from Ollama...`);
+    setOutput(`Pulling ${modelToFetch}. This can take several minutes on first install.`);
+    try {
+      const result = await api('/api/ai/ollama/pull', { method: 'POST', body: JSON.stringify({ model: modelToFetch.trim() }) });
+      setModels(result.installed || []);
+      setAgentForm((current) => ({ ...current, model: modelToFetch.trim() }));
+      setOutput(`${modelToFetch} is available to Ollama. Paperclip will use it when selected on an agent.`);
+      await refresh();
+    } catch (error) {
+      setOutput(error.message);
+      setStatus('Ollama model fetch failed');
+    }
   }
 
   async function createAgent(event) {
@@ -299,13 +319,14 @@ function AgentAdmin({ tenantId, isAdmin }) {
   }
 
   return <section className="contentGrid"><Panel wide icon={Bot} title="AI Agent Configuration" action={isAdmin ? 'Admin only' : 'Read only'}>
-    <div className="statusStrip"><strong>{status}</strong><span>{models.length ? `${models.length} Ollama model(s)` : 'No Ollama models found yet'}</span></div>
+    <div className="statusStrip"><strong>{status}</strong><span>{models.length ? `${models.length} Ollama model(s), ${paperclipModels.length} mapped through Paperclip` : 'No Ollama models found yet'}</span></div>
     {!isAdmin && <div className="errorBox">Only the platform admin can create or modify Paperclip AI agent configuration.</div>}
     <div className="agentLayout">
       {isAdmin && <form className="agentForm" onSubmit={createAgent}>
         <label>Agent name<input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
         <label>Type<input value={agentForm.type} onChange={(event) => setAgentForm({ ...agentForm, type: event.target.value })} /></label>
-        <label>Ollama model<input value={agentForm.model} onChange={(event) => setAgentForm({ ...agentForm, model: event.target.value })} /></label>
+        <label>Installed Ollama model<select value={agentForm.model} onChange={(event) => setAgentForm({ ...agentForm, model: event.target.value })}>{models.length ? models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>) : <option value={agentForm.model}>{agentForm.model}</option>}</select></label>
+        <label>Fetch / install model<div className="inlineField"><input value={modelToFetch} onChange={(event) => setModelToFetch(event.target.value)} placeholder="llama3.2:3b" /><button className="secondaryButton" type="button" onClick={fetchModel}><Plus size={16} /> Fetch</button></div></label>
         <label>Temperature<input type="number" step="0.1" min="0" max="1" value={agentForm.temperature} onChange={(event) => setAgentForm({ ...agentForm, temperature: event.target.value })} /></label>
         <label>Tools<input value={agentForm.tools} onChange={(event) => setAgentForm({ ...agentForm, tools: event.target.value })} /></label>
         <label>System prompt<textarea rows="4" value={agentForm.systemPrompt} onChange={(event) => setAgentForm({ ...agentForm, systemPrompt: event.target.value })} /></label>

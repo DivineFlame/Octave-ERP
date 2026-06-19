@@ -195,7 +195,20 @@ app.get('/api/ai/ollama/models', requireAuth, async (_req, res) => {
   const result = await getOllamaTags();
   res.status(result.ok ? 200 : 502).json({
     ok: result.ok,
+    baseUrl: result.baseUrl,
     models: result.models || [],
+    count: result.models?.length || 0,
+    error: result.error
+  });
+});
+
+app.get('/api/ai/ollama/installed', requireAuth, async (_req, res) => {
+  const result = await getOllamaTags();
+  res.status(result.ok ? 200 : 502).json({
+    ok: result.ok,
+    baseUrl: result.baseUrl,
+    installed: result.models || [],
+    count: result.models?.length || 0,
     error: result.error
   });
 });
@@ -234,10 +247,12 @@ app.post('/api/ai/ollama/pull', requirePlatformAdmin, async (req, res) => {
       body: JSON.stringify({ model, stream: false })
     });
     const body = await safeJson(response);
+    const installed = await getOllamaTags();
     res.status(response.ok ? 202 : response.status).json({
       ok: response.ok,
       model,
       result: body,
+      installed: installed.models || [],
       error: response.ok ? undefined : body.error || 'Ollama model pull failed'
     });
   } catch (error) {
@@ -338,11 +353,17 @@ app.get('/api/paperclip/status', requireAuth, async (_req, res) => {
   res.status(result.ok ? 200 : 502).json(result);
 });
 
+app.get('/api/paperclip/models', requireAuth, async (_req, res) => {
+  const result = await getPaperclipModels();
+  res.status(result.ok ? 200 : 502).json(result);
+});
+
 app.post('/api/paperclip/tasks', requirePlatformAdmin, async (req, res, next) => {
   const tenantId = req.body?.tenantId || defaultTenantId;
   const payload = {
     tenantId,
     task: req.body?.task || 'generic_ai_task',
+    model: req.body?.model,
     input: req.body?.input || {},
     requireApproval: req.body?.requireApproval !== false
   };
@@ -545,6 +566,16 @@ async function getOllamaTags() {
 async function checkPaperclip() {
   try {
     const response = await fetch(`${paperclipBaseUrl}/health`);
+    const body = await safeJson(response);
+    return { ok: response.ok, baseUrl: paperclipBaseUrl, status: response.status, ...body };
+  } catch (error) {
+    return { ok: false, baseUrl: paperclipBaseUrl, error: error.message };
+  }
+}
+
+async function getPaperclipModels() {
+  try {
+    const response = await fetch(`${paperclipBaseUrl}/api/models`);
     const body = await safeJson(response);
     return { ok: response.ok, baseUrl: paperclipBaseUrl, status: response.status, ...body };
   } catch (error) {
