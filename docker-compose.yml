@@ -25,6 +25,7 @@ services:
       PAPERCLIP_BASE_URL: ${PAPERCLIP_BASE_URL:-http://paperclip}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://38.247.188.228:3002}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://38.247.188.228:3002}
+      APP_SECRET: ${APP_SECRET:-change-this-octave-secret}
     ports:
       - "3200:3000"
     depends_on:
