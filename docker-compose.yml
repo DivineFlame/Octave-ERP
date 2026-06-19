@@ -6,7 +6,7 @@ services:
     container_name: octave-crm
     restart: unless-stopped
     ports:
-      - "3001:80"
+      - "3002:80"
 
   paperclip:
     image: ${PAPERCLIP_IMAGE:-paperclip:latest}
