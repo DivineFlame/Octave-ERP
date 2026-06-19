@@ -7,7 +7,7 @@
   --muted: #66737f;
   --line: #dfe5ea;
   --panel: #ffffff;
-  --panel-2: #eef5f2;
+  --soft: #eef5f2;
   --green: #15735c;
   --teal: #0f8793;
   --coral: #d65c48;
@@ -16,9 +16,7 @@
   --shadow: 0 14px 40px rgba(22, 34, 42, 0.08);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -28,15 +26,10 @@ body {
   color: var(--ink);
 }
 
-button,
-input,
-select {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+h3, p { margin: 0; }
+p, small, .muted { color: var(--muted); }
 
 .shell {
   display: grid;
@@ -55,50 +48,29 @@ button {
   color: #f8fbfb;
 }
 
-.brand,
-.approvalPanel,
-.navItem,
-.topbar,
-.tenantSelect,
-.searchBox,
-.userSelect,
-.metric,
-.panelHeader,
-.timeItem,
-.leadRow,
-.agentTop,
-.formActions,
-.channelIcons,
-.signalHeader {
+.brand, .approvalPanel, .navItem, .topbar, .tenantSelect, .searchBox, .userSelect,
+.metric, .panelHeader, .timeItem, .leadRow, .agentTop, .formActions, .channelIcons,
+.signalHeader, .customerTop, .customerCard footer, .tableHeader {
   display: flex;
   align-items: center;
 }
 
-.brand {
-  gap: 10px;
-  min-height: 40px;
+.brand { gap: 10px; min-height: 40px; }
+.brandMark, .avatar, .metricIcon, .leadScore, .time, .agentTop > span {
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
 }
 
 .brandMark {
-  display: grid;
   width: 34px;
   height: 34px;
-  place-items: center;
-  border-radius: 8px;
   background: #35a489;
   color: white;
   font-weight: 800;
 }
 
-.brand strong,
-.campaignRow h3,
-.leadRow h3,
-.agentCard h3 {
-  display: block;
-  margin: 0;
-}
-
-.brand span {
+.brand span, .approvalPanel span {
   display: block;
   color: #b8c6cb;
   font-size: 12px;
@@ -122,8 +94,7 @@ button {
   text-align: left;
 }
 
-.navItem.active,
-.navItem:hover {
+.navItem.active, .navItem:hover {
   background: rgba(255, 255, 255, 0.1);
   color: white;
 }
@@ -137,21 +108,8 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.approvalPanel div {
-  min-width: 0;
-  flex: 1;
-}
-
-.approvalPanel strong,
-.approvalPanel span {
-  display: block;
-}
-
-.approvalPanel span {
-  margin-top: 2px;
-  color: #b8c6cb;
-  font-size: 12px;
-}
+.approvalPanel div { min-width: 0; flex: 1; }
+.approvalPanel span { margin-top: 2px; }
 
 .switch {
   position: relative;
@@ -159,11 +117,7 @@ button {
   height: 24px;
 }
 
-.switch input {
-  position: absolute;
-  opacity: 0;
-}
-
+.switch input { position: absolute; opacity: 0; }
 .switch span {
   position: absolute;
   inset: 0;
@@ -183,13 +137,8 @@ button {
   transition: transform 160ms ease;
 }
 
-.switch input:checked + span {
-  background: #35a489;
-}
-
-.switch input:checked + span::after {
-  transform: translateX(16px);
-}
+.switch input:checked + span { background: #35a489; }
+.switch input:checked + span::after { transform: translateX(16px); }
 
 .workspace {
   min-width: 0;
@@ -206,23 +155,16 @@ button {
   backdrop-filter: blur(12px);
 }
 
-.tenantSelect,
-.searchBox,
-.userSelect {
+.tenantSelect, .searchBox, .userSelect {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
 }
 
-.tenantSelect {
-  gap: 6px;
-  padding: 0 10px;
-}
-
-.tenantSelect select,
-.userSelect select,
-.agentForm select {
+.tenantSelect, .searchBox { gap: 6px; padding: 0 10px; }
+.userSelect { gap: 8px; padding: 0 10px 0 5px; }
+.tenantSelect select, .userSelect select, .agentForm select {
   appearance: none;
   border: 0;
   outline: 0;
@@ -230,29 +172,12 @@ button {
   color: var(--ink);
 }
 
-.searchBox {
-  flex: 1;
-  gap: 6px;
-  padding: 0 10px;
-}
-
-.searchBox input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-}
-
-.userSelect {
-  gap: 8px;
-  padding: 0 10px 0 5px;
-}
+.searchBox { flex: 1; }
+.searchBox input { width: 100%; border: 0; outline: 0; }
 
 .avatar {
-  display: grid;
   width: 26px;
   height: 26px;
-  place-items: center;
-  border-radius: 8px;
   background: #e6f1ed;
   color: var(--green);
   font-size: 12px;
@@ -269,16 +194,12 @@ button {
   border-radius: 8px;
   background:
     linear-gradient(110deg, rgba(21, 115, 92, 0.94), rgba(15, 135, 147, 0.88)),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='420' viewBox='0 0 800 420'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.22'%3E%3Cpath d='M0 320 C170 210 230 390 400 260 S650 155 800 240'/%3E%3Cpath d='M0 180 C140 80 275 250 410 135 S640 35 800 120'/%3E%3Cpath d='M90 420 C170 310 260 330 350 235 S590 170 705 30'/%3E%3C/g%3E%3Cg fill='%23ffffff' fill-opacity='.28'%3E%3Ccircle cx='140' cy='160' r='6'/%3E%3Ccircle cx='410' cy='135' r='7'/%3E%3Ccircle cx='675' cy='84' r='6'/%3E%3Ccircle cx='350' cy='235' r='7'/%3E%3C/g%3E%3C/svg%3E");
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='420' viewBox='0 0 800 420'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.22'%3E%3Cpath d='M0 320 C170 210 230 390 400 260 S650 155 800 240'/%3E%3Cpath d='M0 180 C140 80 275 250 410 135 S640 35 800 120'/%3E%3Cpath d='M90 420 C170 310 260 330 350 235 S590 170 705 30'/%3E%3C/g%3E%3C/svg%3E");
   background-size: cover;
   color: white;
 }
 
-.heroCopy {
-  align-self: center;
-  max-width: 780px;
-}
-
+.heroCopy { align-self: center; max-width: 780px; }
 .eyebrow {
   display: inline-flex;
   gap: 6px;
@@ -299,7 +220,7 @@ button {
 
 .heroCopy p {
   max-width: 720px;
-  margin: 14px 0 0;
+  margin-top: 14px;
   color: #e6fffb;
   font-size: 14px;
   line-height: 1.55;
@@ -316,11 +237,7 @@ button {
   background: rgba(0, 0, 0, 0.16);
 }
 
-.signalHeader,
-.channelIcons {
-  justify-content: space-between;
-}
-
+.signalHeader, .channelIcons { justify-content: space-between; }
 .signalBars {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -331,32 +248,33 @@ button {
 .signalBars span {
   min-height: 27px;
   border-radius: 8px 8px 0 0;
-  background: linear-gradient(180deg, #ffffff, #bff8e9);
+  background: linear-gradient(180deg, #fff, #bff8e9);
 }
 
-.channelIcons {
-  color: #e8fffa;
-}
-
-.statsGrid,
-.contentGrid {
+.statsGrid, .contentGrid, .stageGrid, .customerGrid, .settingsGrid, .taskBoard,
+.campaignList, .leadList, .agentCards, .timeline, .approvalList, .settingsList,
+.leadTable {
   display: grid;
-  gap: 14px;
-  margin-top: 14px;
+  gap: 10px;
 }
 
-.statsGrid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.statsGrid, .contentGrid { gap: 14px; margin-top: 14px; }
+.statsGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.contentGrid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  align-items: start;
 }
 
-.metric,
-.panel,
-.widePanel {
+.metric, .panel, .widePanel, .stageCard, .taskCard, .customerCard, .approvalItem,
+.settingRow, .leadTableRow, .campaignRow, .timeItem, .leadRow, .agentCard {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  box-shadow: var(--shadow);
 }
+
+.metric, .panel, .widePanel { box-shadow: var(--shadow); }
+.panel, .widePanel { min-width: 0; padding: 12px; }
+.widePanel { grid-column: 1 / -1; }
 
 .metric {
   align-items: flex-start;
@@ -366,54 +284,15 @@ button {
 }
 
 .metricIcon {
-  display: grid;
   width: 30px;
   height: 30px;
-  place-items: center;
-  border-radius: 8px;
   background: #e9f4f0;
   color: var(--green);
 }
 
-.metric span,
-.metric small,
-.campaignRow p,
-.campaignRow small,
-.timeItem p,
-.leadRow p,
-.agentCard p,
-.agentCard footer {
-  color: var(--muted);
-}
-
-.metric span {
-  margin-top: 10px;
-  font-size: 13px;
-}
-
-.metric strong {
-  margin-top: 4px;
-  font-size: 23px;
-}
-
-.metric small {
-  margin-top: auto;
-}
-
-.contentGrid {
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  align-items: start;
-}
-
-.panel,
-.widePanel {
-  min-width: 0;
-  padding: 12px;
-}
-
-.widePanel {
-  grid-column: 1 / -1;
-}
+.metric span { margin-top: 10px; color: var(--muted); }
+.metric strong { margin-top: 4px; font-size: 23px; }
+.metric small { margin-top: auto; color: var(--muted); }
 
 .panelHeader {
   justify-content: space-between;
@@ -421,48 +300,29 @@ button {
   margin-bottom: 12px;
 }
 
-.panelHeader div,
-.panelHeader button {
+.panelHeader div, .panelHeader button, .primaryButton, .secondaryButton, .tableHeader button {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.panelHeader h2 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.panelHeader button,
-.primaryButton,
-.secondaryButton {
+.panelHeader h2 { margin: 0; font-size: 15px; }
+.panelHeader button, .primaryButton, .secondaryButton, .tableHeader button {
   min-height: 30px;
   border-radius: 8px;
   padding: 0 10px;
 }
 
-.panelHeader button,
-.secondaryButton {
+.panelHeader button, .secondaryButton, .tableHeader button {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
 }
 
 .primaryButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   border: 0;
   background: var(--green);
-  color: #fff;
-}
-
-.campaignList,
-.leadList,
-.agentCards,
-.timeline {
-  display: grid;
-  gap: 10px;
+  color: white;
 }
 
 .campaignRow {
@@ -470,15 +330,12 @@ button {
   grid-template-columns: minmax(0, 1fr) 200px;
   gap: 14px;
   padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
 }
 
-.campaignRow p,
-.leadRow p,
-.timeItem p,
-.agentCard p {
-  margin: 4px 0 0;
+.campaignRow p, .leadRow p, .timeItem p, .agentCard p, .approvalItem p,
+.taskCard p, .leadTableRow p, .customerCard p {
+  margin-top: 4px;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -489,18 +346,27 @@ button {
   margin-top: 9px;
 }
 
-.chips span {
+.chips span, .badge {
   border-radius: 8px;
   padding: 4px 7px;
   background: #edf3f4;
   color: #35515b;
   font-size: 12px;
+  font-weight: 800;
 }
 
-.progressBlock {
-  align-self: center;
+.badge {
+  display: inline-grid;
+  min-height: 24px;
+  place-items: center;
 }
 
+.badge.danger {
+  background: #f8ebe8;
+  color: var(--coral);
+}
+
+.progressBlock { align-self: center; }
 .progressMeta {
   display: flex;
   justify-content: space-between;
@@ -522,45 +388,26 @@ button {
   background: linear-gradient(90deg, var(--green), var(--teal));
 }
 
-.progressBlock small {
-  display: block;
-  margin-top: 7px;
-}
+.progressBlock small { display: block; margin-top: 7px; color: var(--muted); }
 
-.timeItem {
+.timeItem, .leadRow {
   align-items: flex-start;
   gap: 10px;
   padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
 }
 
 .time {
-  display: grid;
   width: 46px;
   height: 28px;
-  place-items: center;
-  border-radius: 8px;
   background: #eff5fb;
   color: var(--blue);
   font-size: 13px;
   font-weight: 800;
 }
 
-.leadRow {
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
 .leadScore {
-  display: grid;
   width: 36px;
   height: 36px;
-  place-items: center;
-  border-radius: 8px;
   background: #fff3e3;
   color: var(--gold);
   font-weight: 900;
@@ -572,6 +419,70 @@ button {
   color: var(--green);
   font-size: 13px;
   font-weight: 700;
+}
+
+.stageGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stageCard, .taskCard, .customerCard, .approvalItem, .settingRow, .leadTableRow {
+  padding: 10px;
+}
+
+.stageCard strong { font-size: 24px; }
+.stageCard span, .stageCard small, .settingRow span, .leadTableRow > span {
+  color: var(--muted);
+}
+
+.approvalItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.tableHeader {
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.leadTableRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 110px 130px minmax(160px, auto);
+  align-items: center;
+  gap: 10px;
+}
+
+.taskBoard { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.taskCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  gap: 10px;
+}
+
+.taskCard small {
+  grid-column: 1 / -1;
+  color: var(--green);
+  font-weight: 800;
+}
+
+.customerGrid, .settingsGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.customerCard {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.customerTop, .customerCard footer {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customerCard footer span { color: var(--muted); }
+.settingsList h3 { margin: 0 0 10px; font-size: 15px; }
+.settingRow {
+  display: grid;
+  gap: 5px;
 }
 
 .agentLayout {
@@ -586,7 +497,7 @@ button {
   align-content: start;
   padding: 11px;
   border-radius: 8px;
-  background: var(--panel-2);
+  background: var(--soft);
 }
 
 .agentForm label {
@@ -597,8 +508,7 @@ button {
   font-weight: 700;
 }
 
-.agentForm input,
-.agentForm select {
+.agentForm input, .agentForm select {
   min-height: 34px;
   width: 100%;
   border: 1px solid #cddbd7;
@@ -607,24 +517,8 @@ button {
   background: white;
 }
 
-.formActions {
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 2px;
-}
-
-.secondaryButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agentCard {
-  padding: 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
+.formActions { flex-wrap: wrap; gap: 7px; margin-top: 2px; }
+.agentCard { padding: 11px; }
 .agentTop {
   align-items: flex-start;
   justify-content: space-between;
@@ -632,11 +526,8 @@ button {
 }
 
 .agentTop > span {
-  display: grid;
   min-width: 34px;
   height: 24px;
-  place-items: center;
-  border-radius: 8px;
   background: #f8ebe8;
   color: var(--coral);
   font-size: 13px;
@@ -648,102 +539,43 @@ button {
   align-items: center;
   gap: 6px;
   margin-top: 10px;
+  color: var(--muted);
   font-size: 13px;
 }
 
 @media (max-width: 1120px) {
-  .shell {
-    grid-template-columns: 84px minmax(0, 1fr);
-  }
-
-  .brand div:not(.brandMark),
-  .navItem span,
-  .approvalPanel div,
-  .approvalPanel .switch {
+  .shell { grid-template-columns: 84px minmax(0, 1fr); }
+  .brand div:not(.brandMark), .navItem span, .approvalPanel div, .approvalPanel .switch {
     display: none;
   }
-
-  .sidebar {
-    align-items: center;
-    padding: 18px 12px;
-  }
-
-  .navItem {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .approvalPanel {
-    justify-content: center;
-    padding: 12px;
-  }
-
-  .heroBand,
-  .agentLayout {
-    grid-template-columns: 1fr;
-  }
-
-  .statsGrid {
+  .sidebar { align-items: center; padding: 18px 12px; }
+  .navItem { justify-content: center; padding: 0; }
+  .approvalPanel { justify-content: center; padding: 12px; }
+  .heroBand, .agentLayout { grid-template-columns: 1fr; }
+  .statsGrid, .stageGrid, .taskBoard, .customerGrid, .settingsGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .leadTableRow { grid-template-columns: auto minmax(0, 1fr) 90px; }
+  .leadTableRow strong { grid-column: 2 / -1; }
 }
 
 @media (max-width: 780px) {
-  .shell {
+  .shell { display: block; }
+  .sidebar { position: static; height: auto; align-items: stretch; }
+  .brand div:not(.brandMark), .navItem span, .approvalPanel div, .approvalPanel .switch {
     display: block;
   }
-
-  .sidebar {
-    position: static;
-    height: auto;
-    align-items: stretch;
-  }
-
-  .brand div:not(.brandMark),
-  .navItem span,
-  .approvalPanel div,
-  .approvalPanel .switch {
-    display: block;
-  }
-
-  .navList {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-top: 18px;
-  }
-
-  .navItem {
-    justify-content: flex-start;
-    padding: 0 12px;
-  }
-
-  .approvalPanel {
-    margin-top: 18px;
-  }
-
-  .workspace {
-    padding: 16px;
-  }
-
-  .topbar {
-    position: static;
-    display: grid;
-  }
-
-  .heroBand {
-    min-height: auto;
-    padding: 22px;
-  }
-
-  .heroCopy h1 {
-    font-size: 40px;
-  }
-
-  .statsGrid,
-  .contentGrid {
+  .navList { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 18px; }
+  .navItem { justify-content: flex-start; padding: 0 12px; }
+  .approvalPanel { margin-top: 18px; }
+  .workspace { padding: 16px; }
+  .topbar { position: static; display: grid; }
+  .heroBand { min-height: auto; padding: 22px; }
+  .heroCopy h1 { font-size: 40px; }
+  .statsGrid, .contentGrid, .stageGrid, .taskBoard, .customerGrid, .settingsGrid,
+  .campaignRow, .leadTableRow {
     grid-template-columns: 1fr;
   }
-
-  .campaignRow {
-    grid-template-columns: 1fr;
-  }
+  .tableHeader { justify-content: stretch; }
+  .tableHeader button { flex: 1; justify-content: center; }
 }
