@@ -5,13 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: App
     restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3200}
     ports:
       - "3002:80"
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
   api:
     build:
@@ -25,7 +23,8 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-northstar}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       PAPERCLIP_BASE_URL: ${PAPERCLIP_BASE_URL:-http://paperclip}
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://38.247.188.228:3002}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://38.247.188.228:3002}
     ports:
       - "3200:3000"
     depends_on:
@@ -35,11 +34,15 @@ services:
         condition: service_started
 
   paperclip:
-    image: ${PAPERCLIP_IMAGE:-paperclip:latest}
+    build:
+      context: ./paperclip
+      dockerfile: Dockerfile
     container_name: paperclip
     restart: unless-stopped
     environment:
+      PORT: 80
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      DEFAULT_MODEL: ${DEFAULT_OLLAMA_MODEL:-llama3.1:8b}
     ports:
       - "3100:80"
     depends_on:
