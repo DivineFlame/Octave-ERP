@@ -5,7 +5,7 @@ import {
   FileCheck2, Gauge, Instagram, KeyRound, LayoutDashboard, Linkedin,
   LogOut, Mail, Megaphone, MessageSquareText, PhoneCall, Plus,
   RadioTower, Search, Send, Settings2, ShieldCheck, SlidersHorizontal,
-  Sparkles, Target, Twitter, UserCog, Users, Workflow
+  Sparkles, Target, Trash2, Twitter, UserCog, Users, Workflow
 } from 'lucide-react';
 import './styles.css';
 
@@ -113,7 +113,8 @@ function Workspace({ session, onLogout }) {
   const [tenantId, setTenantId] = useState(session.user.tenantId);
   const [systemStatus, setSystemStatus] = useState(null);
   const isAdmin = session.user.platformRole === 'platform_admin';
-  const nav = isAdmin ? [['Admin', UserCog], ...navBase] : navBase;
+  const canManageTenant = isAdmin || session.user.platformRole === 'tenant_admin';
+  const nav = canManageTenant ? [['Admin', UserCog], ...navBase] : navBase;
   const tenant = tenants.find((item) => item.id === tenantId) || session.user.tenant;
 
   useEffect(() => {
@@ -132,7 +133,7 @@ function Workspace({ session, onLogout }) {
         <Topbar user={session.user} tenants={tenants} tenantId={tenantId} setTenantId={setTenantId} onLogout={onLogout} isAdmin={isAdmin} />
         <Hero tenant={tenant} />
         <Stats systemStatus={systemStatus} />
-        {view === 'Admin' && isAdmin && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} />}
+        {view === 'Admin' && canManageTenant && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={isAdmin} />}
         {view === 'Overview' && <Overview tenantId={tenantId} />}
         {view === 'Marketing' && <Marketing tenantId={tenantId} />}
         {view === 'Leads' && <Leads />}
@@ -171,17 +172,25 @@ function Stats({ systemStatus }) {
   </section>;
 }
 
-function AdminConsole({ tenants, setTenants, tenantId, setTenantId }) {
+function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAdmin }) {
   const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
   const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing' });
+  const [passwordForm, setPasswordForm] = useState({ userId: '', newPassword: 'User@12345' });
+  const [socialForm, setSocialForm] = useState({ platform: 'Instagram', handle: '', accessToken: '', appId: '', appSecret: '', pageId: '', status: 'Active' });
   const [users, setUsers] = useState([]);
+  const [socialAccounts, setSocialAccounts] = useState([]);
   const [message, setMessage] = useState('');
 
-  useEffect(() => { loadUsers(); }, [tenantId]);
+  useEffect(() => { loadUsers(); loadSocialAccounts(); }, [tenantId]);
 
   async function loadUsers() {
     const result = await api(`/api/admin/users?tenantId=${tenantId}`);
     setUsers(result.users || []);
+  }
+
+  async function loadSocialAccounts() {
+    const result = await api(`/api/social/accounts?tenantId=${tenantId}`);
+    setSocialAccounts(result.accounts || []);
   }
 
   async function createTenant(event) {
@@ -203,11 +212,62 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId }) {
     setMessage(`Created user ${result.user.email}`);
   }
 
+  async function setTenantStatus(id, status) {
+    setMessage('');
+    const result = await api(`/api/admin/tenants/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+    setTenants(tenants.map((item) => item.id === id ? { ...item, ...result.tenant } : item));
+    setMessage(`${result.tenant.name} is now ${result.tenant.status}`);
+  }
+
+  async function deleteTenant(id) {
+    const tenant = tenants.find((item) => item.id === id);
+    if (!window.confirm(`Delete ${tenant?.name || 'this company'} and all its users?`)) return;
+    setMessage('');
+    await api(`/api/admin/tenants/${id}`, { method: 'DELETE' });
+    const remaining = tenants.filter((item) => item.id !== id);
+    setTenants(remaining);
+    if (tenantId === id && remaining[0]) setTenantId(remaining[0].id);
+    setMessage('Company and related users were deleted');
+  }
+
+  async function changeUserPassword(event) {
+    event.preventDefault();
+    setMessage('');
+    if (!passwordForm.userId) return setMessage('Select a user first');
+    const result = await api(`/api/admin/users/${passwordForm.userId}/password`, { method: 'POST', body: JSON.stringify({ newPassword: passwordForm.newPassword }) });
+    setPasswordForm({ userId: '', newPassword: 'User@12345' });
+    setMessage(`Password updated for ${result.user.email}`);
+  }
+
+  async function saveSocialAccount(event) {
+    event.preventDefault();
+    setMessage('');
+    const credentials = {
+      accessToken: socialForm.accessToken,
+      appId: socialForm.appId,
+      appSecret: socialForm.appSecret,
+      pageId: socialForm.pageId
+    };
+    const result = await api('/api/social/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId, platform: socialForm.platform, handle: socialForm.handle, status: socialForm.status, credentials })
+    });
+    setSocialAccounts((current) => [result.account, ...current.filter((item) => item.id !== result.account.id)]);
+    setSocialForm({ platform: socialForm.platform, handle: '', accessToken: '', appId: '', appSecret: '', pageId: '', status: 'Active' });
+    setMessage(`${result.account.platform} handle saved for agents`);
+  }
+
+  async function deleteSocialAccount(id) {
+    await api(`/api/social/accounts/${id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
+    setSocialAccounts((current) => current.filter((item) => item.id !== id));
+    setMessage('Social handle removed');
+  }
+
   return <section className="contentGrid">
-    <Panel wide icon={UserCog} title="Platform Admin Console" action="Secure">
+    <Panel wide icon={UserCog} title={isPlatformAdmin ? 'Platform Admin Console' : 'Tenant Admin Console'} action="Secure">
       {message && <div className="statusStrip"><strong>{message}</strong><span>Changes are saved in PostgreSQL</span></div>}
       <div className="adminGrid">
-        <form className="agentForm" onSubmit={createTenant}>
+        {isPlatformAdmin && <form className="agentForm" onSubmit={createTenant}>
           <h3>Create Company</h3>
           <label>Company name<input value={tenantForm.name} onChange={(event) => setTenantForm({ ...tenantForm, name: event.target.value })} required /></label>
           <label>Plan<select value={tenantForm.plan} onChange={(event) => setTenantForm({ ...tenantForm, plan: event.target.value })}><option>Starter</option><option>Growth</option><option>Scale</option></select></label>
@@ -215,7 +275,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId }) {
           <label>Tenant admin email<input value={tenantForm.adminEmail} onChange={(event) => setTenantForm({ ...tenantForm, adminEmail: event.target.value })} /></label>
           <label>Tenant admin password<input value={tenantForm.adminPassword} onChange={(event) => setTenantForm({ ...tenantForm, adminPassword: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create company</button>
-        </form>
+        </form>}
         <form className="agentForm" onSubmit={createUser}>
           <h3>Create Tenant User</h3>
           <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required /></label>
@@ -225,7 +285,27 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId }) {
           <label>Team<input value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create user</button>
         </form>
-        <div className="agentCards adminList">{users.map((item) => <article className="agentCard" key={item.id}><div className="agentTop"><div><h3>{item.name}</h3><p>{item.email}</p></div><span>{item.initials}</span></div><footer><UserCog size={15} /><span>{item.role} · {item.team || 'No team'}</span></footer></article>)}</div>
+        <form className="agentForm" onSubmit={changeUserPassword}>
+          <h3>Reset User Password</h3>
+          <label>User<select value={passwordForm.userId} onChange={(event) => setPasswordForm({ ...passwordForm, userId: event.target.value })}><option value="">Select user</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label>
+          <label>New password<input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label>
+          <button className="primaryButton" type="submit"><KeyRound size={16} /> Update password</button>
+        </form>
+        <form className="agentForm" onSubmit={saveSocialAccount}>
+          <h3>Social Handles</h3>
+          <label>Platform<select value={socialForm.platform} onChange={(event) => setSocialForm({ ...socialForm, platform: event.target.value })}><option>Instagram</option><option>Facebook</option><option>LinkedIn</option><option>X / Twitter</option><option>YouTube</option><option>Email</option></select></label>
+          <label>Handle / page<input value={socialForm.handle} onChange={(event) => setSocialForm({ ...socialForm, handle: event.target.value })} placeholder="@brand or page name" required /></label>
+          <label>Access token<input type="password" value={socialForm.accessToken} onChange={(event) => setSocialForm({ ...socialForm, accessToken: event.target.value })} /></label>
+          <label>App ID<input value={socialForm.appId} onChange={(event) => setSocialForm({ ...socialForm, appId: event.target.value })} /></label>
+          <label>App secret<input type="password" value={socialForm.appSecret} onChange={(event) => setSocialForm({ ...socialForm, appSecret: event.target.value })} /></label>
+          <label>Page / account ID<input value={socialForm.pageId} onChange={(event) => setSocialForm({ ...socialForm, pageId: event.target.value })} /></label>
+          <button className="primaryButton" type="submit"><Check size={16} /> Save handle</button>
+        </form>
+        <div className="agentCards adminList">
+          {isPlatformAdmin && <article className="agentCard companyList"><h3>Companies</h3>{tenants.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.plan} · {item.status}</p></div><div className="miniActions"><button onClick={() => setTenantStatus(item.id, item.status === 'Restricted' ? 'Active' : 'Restricted')}>{item.status === 'Restricted' ? 'Activate' : 'Restrict'}</button><button className="dangerButton" onClick={() => deleteTenant(item.id)}><Trash2 size={14} /></button></div></div>)}</article>}
+          <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email}</p></div><span className="badge">{item.role}</span></div>)}</article>
+          <article className="agentCard companyList"><h3>Agent Social Access</h3>{socialAccounts.length ? socialAccounts.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.platform}</strong><p>{item.handle} · {item.credentialKeys?.length || 0} credential keys</p></div><div className="miniActions"><span className="badge">{item.status}</span><button className="dangerButton" onClick={() => deleteSocialAccount(item.id)}><Trash2 size={14} /></button></div></div>) : <p>No social handles configured yet.</p>}</article>
+        </div>
       </div>
     </Panel>
   </section>;
@@ -340,7 +420,32 @@ function AgentAdmin({ tenantId, isAdmin }) {
 }
 
 function Settings({ tenant, user, systemStatus }) {
-  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /></div></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><PasswordPanel /></div></Panel></section>;
+}
+
+function PasswordPanel() {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
+  const [message, setMessage] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setMessage('');
+    try {
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify(form) });
+      setForm({ currentPassword: '', newPassword: '' });
+      setMessage('Password changed successfully');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return <form className="settingsList passwordPanel" onSubmit={submit}>
+    <h3>Change Password</h3>
+    <label>Current password<input type="password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} required /></label>
+    <label>New password<input type="password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} required /></label>
+    {message && <small>{message}</small>}
+    <button className="primaryButton" type="submit"><KeyRound size={16} /> Change password</button>
+  </form>;
 }
 
 function ApprovalList({ tenantId }) {

@@ -52,7 +52,7 @@ Tenant admin: ananya@example.com / Tenant@12345
 Tenant user: karan@example.com / User@12345
 ```
 
-Only the platform admin can create companies, create users across tenants, and configure Paperclip/Ollama AI agents. Tenant users can sign in only to their assigned tenant workspace.
+Only the platform admin can create, restrict, or delete companies and configure Paperclip/Ollama AI agents. Tenant admins can create users, reset their tenant users' passwords, and configure tenant social handles. Tenant users can sign in only to their assigned tenant workspace and can change their own password from Settings.
 
 ## Server Port Plan
 
@@ -125,6 +125,9 @@ This repository currently ships:
 - Ollama status, model discovery, model pull, and test-prompt endpoints
 - Paperclip-compatible local orchestration service mapped to installed Ollama models
 - Approval queue persistence and approve/reject endpoint
+- Company restriction and company deletion with cascading tenant-user cleanup
+- Self-service password changes and tenant-admin user password reset
+- Tenant-scoped social media handles and credential storage for agent access
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -136,10 +139,17 @@ The included API service exposes:
 - `GET /health`
 - `POST /api/auth/login`
 - `GET /api/auth/me`
+- `POST /api/auth/change-password`
 - `GET /api/tenants`
 - `POST /api/admin/tenants`
+- `PATCH /api/admin/tenants/:id`
+- `DELETE /api/admin/tenants/:id`
 - `GET /api/admin/users`
 - `POST /api/admin/users`
+- `POST /api/admin/users/:id/password`
+- `GET /api/social/accounts`
+- `POST /api/social/accounts`
+- `DELETE /api/social/accounts/:id`
 - `GET /api/ai/ollama/status`
 - `GET /api/ai/ollama/models`
 - `GET /api/ai/ollama/installed`

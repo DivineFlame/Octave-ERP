@@ -374,14 +374,14 @@ p, small, .muted { color: var(--muted); }
   margin-bottom: 12px;
 }
 
-.panelHeader div, .panelHeader button, .primaryButton, .secondaryButton, .tableHeader button {
+.panelHeader div, .panelHeader button, .primaryButton, .secondaryButton, .tableHeader button, .dangerButton {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .panelHeader h2 { margin: 0; font-size: 15px; }
-.panelHeader button, .primaryButton, .secondaryButton, .tableHeader button, .iconTextButton {
+.panelHeader button, .primaryButton, .secondaryButton, .tableHeader button, .iconTextButton, .dangerButton {
   min-height: 30px;
   border-radius: 8px;
   padding: 0 10px;
@@ -397,6 +397,12 @@ p, small, .muted { color: var(--muted); }
   border: 0;
   background: var(--green);
   color: white;
+}
+
+.dangerButton {
+  border: 1px solid #f0c7bf;
+  background: #fff4f1;
+  color: var(--coral);
 }
 
 .iconTextButton {
@@ -573,7 +579,7 @@ p, small, .muted { color: var(--muted); }
 
 .adminGrid {
   display: grid;
-  grid-template-columns: 280px 280px minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
   gap: 13px;
   align-items: start;
 }
@@ -627,6 +633,7 @@ p, small, .muted { color: var(--muted); }
 
 .agentCard { padding: 11px; }
 .adminList {
+  grid-column: 1 / -1;
   max-height: 560px;
   overflow: auto;
   padding-right: 4px;
@@ -691,6 +698,63 @@ p, small, .muted { color: var(--muted); }
   width: 100%;
   margin-top: 10px;
 }
+
+.companyList {
+  display: grid;
+  gap: 9px;
+}
+
+.companyRow, .miniActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.companyRow {
+  justify-content: space-between;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.companyRow:first-of-type { border-top: 0; padding-top: 0; }
+.companyRow p { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.miniActions { flex-wrap: wrap; justify-content: flex-end; }
+.miniActions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 0 9px;
+}
+.miniActions .dangerButton {
+  border-color: #f0c7bf;
+  background: #fff4f1;
+}
+
+.passwordPanel {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbfb;
+}
+
+.passwordPanel label {
+  display: grid;
+  gap: 6px;
+  color: #40515a;
+  font-weight: 700;
+}
+
+.passwordPanel input {
+  min-height: 34px;
+  width: 100%;
+  border: 1px solid #cddbd7;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: white;
+}
+
+.passwordPanel button { justify-content: center; }
 
 .approvalActions {
   grid-column: 1 / -1;

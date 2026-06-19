@@ -110,6 +110,19 @@ create table if not exists approvals (
   decided_at timestamptz
 );
 
+create table if not exists social_accounts (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null references tenants(id) on delete cascade,
+  platform text not null,
+  handle text not null default '',
+  credentials jsonb not null default '{}'::jsonb,
+  status text not null default 'Active',
+  created_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (tenant_id, platform)
+);
+
 insert into tenants (id, name, plan, status)
 values
   ('northstar', 'Northstar Wellness', 'Growth', 'Active'),

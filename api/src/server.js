@@ -60,6 +60,9 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!user || !user.is_active || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ ok: false, error: 'Invalid email or password' });
     }
+    if (user.tenant_status === 'Restricted' && user.platform_role !== 'platform_admin') {
+      return res.status(403).json({ ok: false, error: 'Company access is restricted. Contact the platform admin.' });
+    }
 
     const safeUser = toSafeUser(user);
     const token = signToken({ sub: safeUser.id, tenantId: safeUser.tenantId, role: safeUser.platformRole });
@@ -71,6 +74,24 @@ app.post('/api/auth/login', async (req, res, next) => {
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   res.json({ ok: true, user: req.user });
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
+  const currentPassword = String(req.body?.currentPassword || '');
+  const newPassword = String(req.body?.newPassword || '');
+  if (!currentPassword || !newPassword) return res.status(400).json({ ok: false, error: 'currentPassword and newPassword are required' });
+  if (newPassword.length < 8) return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters' });
+
+  try {
+    const result = await pool.query('select password_hash from app_users where id = $1', [req.user.id]);
+    if (!result.rowCount || !verifyPassword(currentPassword, result.rows[0].password_hash)) {
+      return res.status(401).json({ ok: false, error: 'Current password is incorrect' });
+    }
+    await pool.query('update app_users set password_hash = $2, updated_at = now() where id = $1', [req.user.id, hashPassword(newPassword)]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/system/status', requireAuth, async (_req, res) => {
@@ -148,6 +169,45 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
   }
 });
 
+app.patch('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next) => {
+  const name = cleanString(req.body?.name);
+  const plan = cleanString(req.body?.plan);
+  const status = cleanString(req.body?.status);
+  if (status && !['Active', 'Restricted', 'Review'].includes(status)) {
+    return res.status(400).json({ ok: false, error: 'status must be Active, Restricted, or Review' });
+  }
+
+  try {
+    const result = await pool.query(
+      `update tenants
+          set name = coalesce($2, name),
+              plan = coalesce($3, plan),
+              status = coalesce($4, status)
+        where id = $1
+        returning id, name, plan, status`,
+      [req.params.id, name || null, plan || null, status || null]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
+    res.json({ ok: true, tenant: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next) => {
+  if (req.params.id === req.user.tenantId) {
+    return res.status(400).json({ ok: false, error: 'You cannot delete the company your admin account belongs to' });
+  }
+
+  try {
+    const result = await pool.query('delete from tenants where id = $1 returning id, name', [req.params.id]);
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
+    res.json({ ok: true, tenant: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/admin/users', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
@@ -181,6 +241,97 @@ app.post('/api/admin/users', requireAuth, async (req, res, next) => {
       team: cleanString(req.body?.team)
     });
     res.status(201).json({ ok: true, user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) => {
+  const newPassword = String(req.body?.newPassword || '');
+  if (newPassword.length < 8) return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters' });
+
+  try {
+    const userResult = await pool.query(
+      `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
+              team, initials, is_active as "isActive", created_at as "createdAt"
+         from app_users
+        where id = $1`,
+      [req.params.id]
+    );
+    if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
+    const target = userResult.rows[0];
+    if (!canManageTenantUsers(req.user, target.tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can change this user password' });
+    }
+    if (target.platformRole === 'platform_admin' && !isPlatformAdmin(req.user)) {
+      return res.status(403).json({ ok: false, error: 'Platform admin password can only be changed by that admin' });
+    }
+    await pool.query('update app_users set password_hash = $2, updated_at = now() where id = $1', [target.id, hashPassword(newPassword)]);
+    res.json({ ok: true, user: target });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/social/accounts', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select id, tenant_id as "tenantId", platform, handle, credentials, status,
+              created_at as "createdAt", updated_at as "updatedAt"
+         from social_accounts
+        where tenant_id = $1
+        order by platform`,
+      [tenantId]
+    );
+    res.json({ ok: true, accounts: result.rows.map(maskSocialAccount) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/social/accounts', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getScopedTenantId(req);
+    if (!canManageTenantUsers(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can configure social accounts' });
+    }
+    const platform = cleanString(req.body?.platform);
+    const handle = cleanString(req.body?.handle) || '';
+    const credentials = normalizeCredentials(req.body?.credentials);
+    const status = cleanString(req.body?.status) || 'Active';
+    if (!platform) return res.status(400).json({ ok: false, error: 'platform is required' });
+
+    const result = await pool.query(
+      `insert into social_accounts (tenant_id, platform, handle, credentials, status, created_by)
+       values ($1,$2,$3,$4::jsonb,$5,$6)
+       on conflict (tenant_id, platform) do update
+          set handle = excluded.handle,
+              credentials = social_accounts.credentials || excluded.credentials,
+              status = excluded.status,
+              updated_at = now()
+       returning id, tenant_id as "tenantId", platform, handle, credentials, status,
+                 created_at as "createdAt", updated_at as "updatedAt"`,
+      [tenantId, platform, handle, JSON.stringify(credentials), status, req.user.id]
+    );
+    res.status(201).json({ ok: true, account: maskSocialAccount(result.rows[0]) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/social/accounts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getScopedTenantId(req);
+    if (!canManageTenantUsers(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can remove social accounts' });
+    }
+    const result = await pool.query(
+      'delete from social_accounts where id = $1 and tenant_id = $2 returning id',
+      [req.params.id, tenantId]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'social account not found' });
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -459,6 +610,9 @@ async function requireAuth(req, res, next) {
     );
     const user = result.rows[0];
     if (!user || !user.is_active) return res.status(401).json({ ok: false, error: 'Authentication required' });
+    if (user.tenant_status === 'Restricted' && user.platform_role !== 'platform_admin') {
+      return res.status(403).json({ ok: false, error: 'Company access is restricted. Contact the platform admin.' });
+    }
     req.user = toSafeUser(user);
     next();
   } catch (error) {
@@ -506,6 +660,18 @@ async function ensureSchema() {
     alter table app_users add column if not exists platform_role text not null default 'tenant_user';
     alter table app_users add column if not exists is_active boolean not null default true;
     alter table app_users add column if not exists updated_at timestamptz not null default now();
+    create table if not exists social_accounts (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      platform text not null,
+      handle text not null default '',
+      credentials jsonb not null default '{}'::jsonb,
+      status text not null default 'Active',
+      created_by uuid references app_users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (tenant_id, platform)
+    );
   `);
 
   await pool.query(
@@ -703,6 +869,30 @@ function toSafeUser(row) {
       plan: row.plan,
       status: row.tenant_status
     }
+  };
+}
+
+function normalizeCredentials(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([key, value]) => [cleanString(key), typeof value === 'string' ? value.trim() : value])
+      .filter(([key, value]) => key && value !== undefined && value !== null && value !== '')
+  );
+}
+
+function maskSocialAccount(row) {
+  const credentials = row.credentials && typeof row.credentials === 'object' ? row.credentials : {};
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    platform: row.platform,
+    handle: row.handle,
+    status: row.status,
+    credentialKeys: Object.keys(credentials),
+    hasCredentials: Object.keys(credentials).length > 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
   };
 }
 
