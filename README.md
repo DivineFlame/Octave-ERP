@@ -42,6 +42,8 @@ For a direct host-port setup, use these mappings:
 
 The included compose file maps Octave CRM to `3002:80` and Paperclip to `3100:80`. Dokploy itself should be installed separately and mapped to `3000:80`. Ollama/Open WebUI should keep using `3001:80`.
 
+In Dokploy, this app is expected to sit under project `Octave CRM` with the app/container name `App`. The compose service is therefore named `app` and uses `container_name: App`.
+
 Set the Paperclip image and Ollama URL through environment variables:
 
 ```bash
