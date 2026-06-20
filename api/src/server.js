@@ -943,10 +943,41 @@ app.post('/api/ai/agents/:id/run', requireAuth, async (req, res, next) => {
       risk: req.body?.risk || 'Medium',
       prompt,
       output,
-      status: 'pending'
+      status: 'pending',
+      actionType: req.body?.actionType || null,
+      actionPayload: req.body?.actionPayload || {}
     });
 
     res.json({ ok: true, output, approval });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ai/workflows', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const workflow = normalizeWorkflow(req.body);
+    if (!workflow.type) return res.status(400).json({ ok: false, error: 'workflow type is required' });
+
+    const agent = await findWorkflowAgent(tenantId, workflow.type);
+    const prompt = buildWorkflowPrompt(workflow);
+    const output = agent ? await runAgent(agent, prompt, tenantId) : await runFallbackWorkflow(prompt);
+    const action = buildWorkflowAction(workflow, output);
+    const approval = await createApproval({
+      tenantId,
+      title: workflow.title,
+      sourceAgentId: agent?.id || null,
+      risk: workflow.risk,
+      prompt,
+      output,
+      status: 'pending',
+      actionType: action.type,
+      actionPayload: action.payload
+    });
+
+    res.status(202).json({ ok: true, output, approval, action });
   } catch (error) {
     next(error);
   }
@@ -981,7 +1012,9 @@ app.post('/api/paperclip/tasks', requirePlatformAdmin, async (req, res, next) =>
       risk: req.body?.risk || 'Medium',
       prompt: JSON.stringify(payload.input),
       output: JSON.stringify(paperclipResponse),
-      status: 'pending'
+      status: 'pending',
+      actionType: req.body?.actionType || null,
+      actionPayload: req.body?.actionPayload || {}
     });
     res.status(202).json({ ok: true, task: paperclipResponse, approval });
   } catch (error) {
@@ -997,6 +1030,8 @@ app.get('/api/approvals', requireAuth, async (req, res, next) => {
     const tenantId = getScopedTenantId(req);
     const result = await pool.query(
       `select a.id, a.title, a.risk, a.status, a.prompt, a.output,
+              a.action_type as "actionType", a.action_payload as "actionPayload",
+              a.execution_result as "executionResult",
               a.created_at as "createdAt", a.decided_at as "decidedAt",
               ag.name as agent
          from approvals a
@@ -1021,17 +1056,24 @@ app.patch('/api/approvals/:id', requireAuth, async (req, res, next) => {
   }
   try {
     const tenantId = getScopedTenantId(req);
+    const current = await pool.query('select id, status, action_type, action_payload from approvals where id = $1 and tenant_id = $2', [req.params.id, tenantId]);
+    if (!current.rowCount) return res.status(404).json({ ok: false, error: 'approval not found' });
+    const execution = status === 'approved' && current.rows[0].status !== 'approved'
+      ? await executeApprovalAction({ tenantId, actionType: current.rows[0].action_type, actionPayload: current.rows[0].action_payload, output: req.body?.output })
+      : null;
     const result = await pool.query(
       `update approvals
           set status = $3,
               decided_by = $4,
               decided_at = case when $3 = 'pending' then null else now() end,
-              decision_note = $5
+              decision_note = $5,
+              execution_result = coalesce($6::jsonb, execution_result)
         where id = $1 and tenant_id = $2
-        returning id, title, risk, status, prompt, output, created_at as "createdAt", decided_at as "decidedAt"`,
-      [req.params.id, tenantId, status, req.user.email, req.body?.decisionNote || null]
+        returning id, title, risk, status, prompt, output, action_type as "actionType",
+                  action_payload as "actionPayload", execution_result as "executionResult",
+                  created_at as "createdAt", decided_at as "decidedAt"`,
+      [req.params.id, tenantId, status, req.user.email, req.body?.decisionNote || null, execution ? JSON.stringify(execution) : null]
     );
-    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'approval not found' });
     res.json({ ok: true, approval: result.rows[0] });
   } catch (error) {
     next(error);
@@ -1170,6 +1212,37 @@ async function ensureSchema() {
       status text not null default 'Open',
       created_at timestamptz not null default now()
     );
+    create table if not exists ai_agents (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      name text not null,
+      type text not null,
+      model text not null,
+      temperature numeric(3,2) not null default 0.40,
+      approval_rule text not null default 'Human approval before execution',
+      status text not null default 'Ready',
+      tools text[] not null default '{}',
+      system_prompt text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create table if not exists approvals (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      source_agent_id uuid references ai_agents(id) on delete set null,
+      title text not null,
+      risk text not null default 'Medium',
+      prompt text not null default '',
+      output text not null default '',
+      status text not null default 'pending',
+      decided_by text,
+      decision_note text,
+      created_at timestamptz not null default now(),
+      decided_at timestamptz
+    );
+    alter table approvals add column if not exists action_type text;
+    alter table approvals add column if not exists action_payload jsonb not null default '{}'::jsonb;
+    alter table approvals add column if not exists execution_result jsonb;
     create table if not exists social_accounts (
       id uuid primary key default gen_random_uuid(),
       tenant_id text not null references tenants(id) on delete cascade,
@@ -1375,14 +1448,155 @@ async function forwardToPaperclip(payload) {
   }
 }
 
-async function createApproval({ tenantId, title, sourceAgentId, risk, prompt, output, status }) {
+async function createApproval({ tenantId, title, sourceAgentId, risk, prompt, output, status, actionType, actionPayload }) {
   const result = await pool.query(
-    `insert into approvals (tenant_id, source_agent_id, title, risk, prompt, output, status)
-     values ($1,$2,$3,$4,$5,$6,$7)
-     returning id, title, risk, status, prompt, output, created_at as "createdAt"`,
-    [tenantId, sourceAgentId, title || 'AI generated draft', risk, prompt, output, status]
+    `insert into approvals (tenant_id, source_agent_id, title, risk, prompt, output, status, action_type, action_payload)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+     returning id, title, risk, status, prompt, output, action_type as "actionType",
+               action_payload as "actionPayload", execution_result as "executionResult",
+               created_at as "createdAt"`,
+    [tenantId, sourceAgentId, title || 'AI generated draft', risk, prompt, output, status, actionType || null, JSON.stringify(actionPayload || {})]
   );
   return result.rows[0];
+}
+
+function normalizeWorkflow(input = {}) {
+  return {
+    type: cleanString(input.type),
+    title: cleanString(input.title) || 'AI workflow draft',
+    subject: cleanString(input.subject),
+    recipient: cleanString(input.recipient),
+    context: cleanString(input.context),
+    risk: cleanString(input.risk) || 'Medium',
+    campaignName: cleanString(input.campaignName),
+    channels: normalizeTextArray(input.channels),
+    dueAt: cleanString(input.dueAt) || null,
+    priority: cleanString(input.priority) || 'Medium',
+    channel: cleanString(input.channel) || 'Email'
+  };
+}
+
+async function findWorkflowAgent(tenantId, type) {
+  const typeMap = {
+    campaign_brief: ['Planning', 'Content', 'General'],
+    follow_up_email: ['Follow-up', 'Content', 'General'],
+    follow_up_task: ['Follow-up', 'Planning', 'General']
+  };
+  const preferred = typeMap[type] || ['General'];
+  const result = await pool.query(
+    `select *
+       from ai_agents
+      where tenant_id = $1 and status <> 'Disabled'
+      order by array_position($2::text[], type) nulls last, created_at
+      limit 1`,
+    [tenantId, preferred]
+  );
+  return result.rows[0] || null;
+}
+
+function buildWorkflowPrompt(workflow) {
+  if (workflow.type === 'campaign_brief') {
+    return `Create a concise campaign brief for: ${workflow.campaignName || workflow.subject || workflow.title}.
+Channels: ${workflow.channels.join(', ') || 'Email, Social'}.
+Context: ${workflow.context || 'No extra context.'}
+Return a practical brief with audience, offer, message, channel plan, and approval notes.`;
+  }
+  if (workflow.type === 'follow_up_email') {
+    return `Draft a professional follow-up email.
+Subject: ${workflow.subject || workflow.title}
+Recipient: ${workflow.recipient || 'lead'}
+Context: ${workflow.context || 'No extra context.'}
+Return only the email body.`;
+  }
+  if (workflow.type === 'follow_up_task') {
+    return `Create a short follow-up task.
+Subject: ${workflow.subject || workflow.title}
+Context: ${workflow.context || 'No extra context.'}
+Return one action-oriented task title.`;
+  }
+  return workflow.context || workflow.title;
+}
+
+async function runFallbackWorkflow(prompt) {
+  return `Draft generated for approval:\n\n${prompt}`;
+}
+
+function buildWorkflowAction(workflow, output) {
+  if (workflow.type === 'campaign_brief') {
+    return {
+      type: 'create_campaign',
+      payload: {
+        name: workflow.campaignName || workflow.subject || workflow.title,
+        stage: 'Human approval',
+        progress: 20,
+        budget: 0,
+        leadsCount: 0,
+        channels: workflow.channels,
+        approvalNotes: output
+      }
+    };
+  }
+  if (workflow.type === 'follow_up_email') {
+    return {
+      type: 'send_email',
+      payload: {
+        to: workflow.recipient,
+        subject: workflow.subject || workflow.title,
+        text: output,
+        html: `<p>${escapeHtml(output).replaceAll('\n', '<br/>')}</p>`
+      }
+    };
+  }
+  if (workflow.type === 'follow_up_task') {
+    return {
+      type: 'create_follow_up_task',
+      payload: {
+        title: firstLine(output) || workflow.subject || workflow.title,
+        dueAt: workflow.dueAt,
+        priority: workflow.priority,
+        channel: workflow.channel,
+        status: 'Open'
+      }
+    };
+  }
+  return { type: null, payload: {} };
+}
+
+async function executeApprovalAction({ tenantId, actionType, actionPayload }) {
+  if (!actionType) return { executed: false, reason: 'No executable action attached' };
+  const payload = actionPayload && typeof actionPayload === 'object' ? actionPayload : {};
+  if (actionType === 'create_campaign') {
+    const data = normalizeCampaign(payload);
+    const result = await pool.query(
+      `insert into campaigns (tenant_id, name, stage, progress, budget, leads_count, channels)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       returning id, name`,
+      [tenantId, data.name || 'Approved AI Campaign', data.stage, data.progress, data.budget, data.leadsCount, data.channels]
+    );
+    return { executed: true, actionType, campaign: result.rows[0] };
+  }
+  if (actionType === 'create_follow_up_task') {
+    const data = normalizeTask(payload);
+    const result = await pool.query(
+      `insert into follow_up_tasks (tenant_id, title, due_at, priority, channel, status)
+       values ($1,$2,$3,$4,$5,$6)
+       returning id, title`,
+      [tenantId, data.title || 'Approved AI follow-up', data.dueAt, data.priority, data.channel, data.status]
+    );
+    return { executed: true, actionType, task: result.rows[0] };
+  }
+  if (actionType === 'send_email') {
+    if (!payload.to || !payload.subject || !payload.text) return { executed: false, actionType, reason: 'Email action requires recipient, subject, and text' };
+    const delivery = await sendMailWithConfig({
+      tenantId,
+      to: payload.to,
+      subject: payload.subject,
+      text: payload.text,
+      html: payload.html || `<p>${escapeHtml(payload.text).replaceAll('\n', '<br/>')}</p>`
+    });
+    return { executed: Boolean(delivery.sent), actionType, delivery };
+  }
+  return { executed: false, actionType, reason: 'Unsupported action type' };
 }
 
 async function createUser(client, { tenantId, name, email, password, role, platformRole, team, avatarUrl }) {
@@ -1761,6 +1975,10 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function firstLine(value) {
+  return String(value || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean) || '';
 }
 
 async function safeJson(response) {

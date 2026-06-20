@@ -419,6 +419,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
   const [modelToFetch, setModelToFetch] = useState('llama3.2:3b');
   const [paperclipModels, setPaperclipModels] = useState([]);
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
+  const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', dueAt: '', priority: 'Medium', channel: 'Email' });
   const selectedModel = agentForm.model || models[0]?.name || 'llama3.1:8b';
 
   useEffect(() => { refresh(); }, [tenantId]);
@@ -486,6 +487,15 @@ function AgentAdmin({ tenantId, isAdmin }) {
     } catch (error) { setOutput(error.message); }
   }
 
+  async function runWorkflow(event) {
+    event.preventDefault();
+    setOutput('Creating AI workflow draft for approval...');
+    try {
+      const result = await api('/api/ai/workflows', { method: 'POST', body: JSON.stringify({ ...workflowForm, tenantId }) });
+      setOutput(`${result.output}\n\nApproval created: ${result.approval.title}`);
+    } catch (error) { setOutput(error.message); }
+  }
+
   return <section className="contentGrid"><Panel wide icon={Bot} title="AI Agent Configuration" action={isAdmin ? 'Admin only' : 'Read only'}>
     <div className="statusStrip"><strong>{status}</strong><span>{models.length ? `${models.length} Ollama model(s), ${paperclipModels.length} mapped through Paperclip` : 'No Ollama models found yet'}</span></div>
     {!isAdmin && <div className="errorBox">Only the platform admin can create or modify Paperclip AI agent configuration.</div>}
@@ -501,6 +511,19 @@ function AgentAdmin({ tenantId, isAdmin }) {
         <label>Test prompt<textarea rows="4" value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
         <div className="formActions"><button className="secondaryButton" type="button" onClick={activateFramework}><Bot size={16} /> Activate framework</button><button className="secondaryButton" type="button" onClick={testOllama}><SlidersHorizontal size={16} /> Test Ollama</button><button className="primaryButton" type="submit"><Check size={16} /> Save agent</button></div>
         <div className="responseBox">{output || 'Paperclip and Ollama output will appear here.'}</div>
+      </form>}
+      {!isAdmin && <form className="agentForm" onSubmit={runWorkflow}>
+        <h3>AI Workflow</h3>
+        <label>Workflow<select value={workflowForm.type} onChange={(event) => setWorkflowForm({ ...workflowForm, type: event.target.value })}><option value="campaign_brief">Campaign brief</option><option value="follow_up_email">Follow-up email</option><option value="follow_up_task">Follow-up task</option></select></label>
+        <label>Title<input value={workflowForm.title} onChange={(event) => setWorkflowForm({ ...workflowForm, title: event.target.value })} /></label>
+        {workflowForm.type === 'campaign_brief' && <label>Campaign name<input value={workflowForm.campaignName} onChange={(event) => setWorkflowForm({ ...workflowForm, campaignName: event.target.value })} /></label>}
+        {workflowForm.type === 'follow_up_email' && <label>Recipient email<input value={workflowForm.recipient} onChange={(event) => setWorkflowForm({ ...workflowForm, recipient: event.target.value })} /></label>}
+        <label>Subject<input value={workflowForm.subject} onChange={(event) => setWorkflowForm({ ...workflowForm, subject: event.target.value })} /></label>
+        <label>Channels<input value={workflowForm.channels} onChange={(event) => setWorkflowForm({ ...workflowForm, channels: event.target.value })} /></label>
+        {workflowForm.type === 'follow_up_task' && <label>Due at<input type="datetime-local" value={workflowForm.dueAt} onChange={(event) => setWorkflowForm({ ...workflowForm, dueAt: event.target.value })} /></label>}
+        <label>Context<textarea rows="4" value={workflowForm.context} onChange={(event) => setWorkflowForm({ ...workflowForm, context: event.target.value })} /></label>
+        <button className="primaryButton" type="submit"><Bot size={16} /> Generate for approval</button>
+        <div className="responseBox">{output || 'Workflow drafts and execution notes will appear here.'}</div>
       </form>}
       <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
     </div>
@@ -614,9 +637,10 @@ function ApprovalList({ tenantId }) {
   useEffect(() => { api(`/api/approvals?tenantId=${tenantId}`).then((result) => setItems(result.approvals || [])).catch(() => {}); }, [tenantId]);
   async function decide(id, status) {
     await api(`/api/approvals/${id}`, { method: 'PATCH', body: JSON.stringify({ status, tenantId }) });
-    setItems((current) => current.map((item) => item.id === id ? { ...item, status } : item));
+    const result = await api(`/api/approvals?tenantId=${tenantId}`);
+    setItems(result.approvals || []);
   }
-  return <div className="approvalList">{items.map((approval) => <article className="approvalItem" key={approval.id}><div><strong>{approval.title}</strong><p>{approval.agent || 'System'} · {approval.status}</p></div><span className={approval.risk === 'High' ? 'badge danger' : 'badge'}>{approval.risk}</span>{approval.status === 'pending' && <div className="approvalActions"><button onClick={() => decide(approval.id, 'approved')}>Approve</button><button onClick={() => decide(approval.id, 'rejected')}>Reject</button></div>}</article>)}</div>;
+  return <div className="approvalList">{items.map((approval) => <article className="approvalItem" key={approval.id}><div><strong>{approval.title}</strong><p>{approval.agent || 'System'} · {approval.status}{approval.actionType ? ` · ${approval.actionType}` : ''}</p>{approval.executionResult && <small>{approval.executionResult.executed ? 'Executed' : 'Not executed'}{approval.executionResult.reason ? `: ${approval.executionResult.reason}` : ''}</small>}</div><span className={approval.risk === 'High' ? 'badge danger' : 'badge'}>{approval.risk}</span>{approval.status === 'pending' && <div className="approvalActions"><button onClick={() => decide(approval.id, 'approved')}>Approve & execute</button><button onClick={() => decide(approval.id, 'rejected')}>Reject</button></div>}</article>)}</div>;
 }
 
 function CampaignRow({ campaign, onSchedule, onDelete }) {

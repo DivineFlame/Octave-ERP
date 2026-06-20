@@ -135,6 +135,8 @@ This repository currently ships:
 - Platform and tenant SMTP configuration with credential email delivery
 - One-click agentic framework activation for default Paperclip/Ollama agents
 - Tenant-scoped CRUD APIs for campaigns, leads, follow-up tasks, and customers
+- Native AI workflow drafts for campaigns, follow-up emails, and follow-up tasks
+- Approval execution that creates campaigns/tasks or sends SMTP email only after human approval
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -170,6 +172,7 @@ The included API service exposes:
 - `POST /api/ai/agents`
 - `PUT /api/ai/agents/:id`
 - `POST /api/ai/agents/:id/run`
+- `POST /api/ai/workflows`
 - `POST /api/ai/framework/activate`
 - `GET /api/paperclip/status`
 - `GET /api/paperclip/models`
