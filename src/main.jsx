@@ -27,6 +27,22 @@ async function api(path, options = {}) {
   return body;
 }
 
+function uploadImage(file, purpose) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const result = await api('/api/uploads', { method: 'POST', body: JSON.stringify({ purpose, dataUrl: reader.result }) });
+        resolve(result.url);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(new Error('Unable to read image'));
+    reader.readAsDataURL(file);
+  });
+}
+
 const posts = [
   ['09:30', 'Carousel: 5 signs your team needs a wellness reset', 'Instagram', 'Needs approval'],
   ['11:00', 'Thought-leadership post for HR leaders', 'LinkedIn', 'AI review'],
@@ -194,8 +210,8 @@ function Workspace({ session, onLogout }) {
         {!isAdmin && <Hero tenant={tenant} />}
         {!isAdmin && <Stats systemStatus={systemStatus} tenantId={tenantId} />}
         {view === 'Admin' && canManageTenant && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={isAdmin} />}
-        {!isAdmin && view === 'Overview' && <Overview tenantId={tenantId} />}
-        {!isAdmin && view === 'Marketing' && <Marketing tenantId={tenantId} />}
+        {!isAdmin && view === 'Overview' && <Overview tenantId={tenantId} canApprove={session.user.platformRole === 'tenant_admin' || session.user.platformRole === 'approver'} />}
+        {!isAdmin && view === 'Marketing' && <Marketing tenantId={tenantId} canApprove={session.user.platformRole === 'tenant_admin' || session.user.platformRole === 'approver'} />}
         {!isAdmin && view === 'Leads' && <Leads tenantId={tenantId} />}
         {!isAdmin && view === 'Follow-ups' && <FollowUps tenantId={tenantId} />}
         {!isAdmin && view === 'Customers' && <Customers tenant={tenant} />}
@@ -406,14 +422,14 @@ function ActivityPanel({ tenantId }) {
   return <article className="agentCard companyList"><h3>Activity & Email Logs</h3><div className="activityGrid"><div>{auditLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.action}</strong><p>{item.actor || 'System'} · {formatDue(item.createdAt)}</p></div>)}</div><div>{emailLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.status}: {item.recipient}</strong><p>{item.subject}</p></div>)}</div></div></article>;
 }
 
-function Overview({ tenantId }) {
+function Overview({ tenantId, canApprove }) {
   const [leadsData, setLeadsData] = useState([]);
   useEffect(() => { api(`/api/leads?tenantId=${tenantId}`).then((result) => setLeadsData(result.leads || [])).catch(() => {}); }, [tenantId]);
   const stages = ['New', 'Qualified', 'Proposal', 'Won'];
-  return <section className="contentGrid"><Panel icon={BarChart3} title="Revenue Pipeline" action="Forecast"><div className="stageGrid">{stages.map((stage) => { const count = leadsData.filter((lead) => lead.stage === stage).length; return <div className="stageCard" key={stage}><span>{stage}</span><strong>{count}</strong><small>{count ? 'Active records' : 'No records yet'}</small></div>; })}</div></Panel><Panel icon={ShieldCheck} title="Approval Queue" action="Review"><ApprovalList tenantId={tenantId} /></Panel></section>;
+  return <section className="contentGrid"><Panel icon={BarChart3} title="Revenue Pipeline" action="Forecast"><div className="stageGrid">{stages.map((stage) => { const count = leadsData.filter((lead) => lead.stage === stage).length; return <div className="stageCard" key={stage}><span>{stage}</span><strong>{count}</strong><small>{count ? 'Active records' : 'No records yet'}</small></div>; })}</div></Panel><Panel icon={ShieldCheck} title="Approval Queue" action="Review"><ApprovalList tenantId={tenantId} canApprove={canApprove} /></Panel></section>;
 }
 
-function Marketing({ tenantId }) {
+function Marketing({ tenantId, canApprove }) {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ name: '', stage: 'Draft', progress: 0, budget: 0, leadsCount: 0, channels: 'Instagram, Email' });
   const [message, setMessage] = useState('');
@@ -438,12 +454,14 @@ function Marketing({ tenantId }) {
     await api(`/api/campaigns/${id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
     setItems((current) => current.filter((item) => item.id !== id));
   }
-  return <section className="contentGrid"><Panel wide icon={CalendarDays} title="Campaign Command Center" action="New campaign">{message && <div className="statusStrip"><strong>{message}</strong><span>Stored in PostgreSQL</span></div>}<div className="moduleGrid"><form className="agentForm" onSubmit={createCampaign}><h3>Create Campaign</h3><label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>Draft</option><option>AI drafting</option><option>Human approval</option><option>Scheduled</option></select></label><label>Progress<input type="number" min="0" max="100" value={form.progress} onChange={(event) => setForm({ ...form, progress: event.target.value })} /></label><label>Budget<input type="number" min="0" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></label><label>Leads<input type="number" min="0" value={form.leadsCount} onChange={(event) => setForm({ ...form, leadsCount: event.target.value })} /></label><label>Channels<input value={form.channels} onChange={(event) => setForm({ ...form, channels: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save campaign</button></form><div className="campaignList">{items.map((campaign) => <CampaignRow campaign={campaign} key={campaign.id} onSchedule={() => updateCampaign(campaign.id, 'Scheduled')} onDelete={() => deleteCampaign(campaign.id)} />)}</div></div></Panel><PublishingQueue /><Panel icon={ShieldCheck} title="Approval Queue" action="Approve"><ApprovalList tenantId={tenantId} /></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={CalendarDays} title="Campaign Command Center" action="New campaign">{message && <div className="statusStrip"><strong>{message}</strong><span>Stored in PostgreSQL</span></div>}<div className="moduleGrid"><form className="agentForm" onSubmit={createCampaign}><h3>Create Campaign</h3><label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>Draft</option><option>AI drafting</option><option>Human approval</option><option>Scheduled</option></select></label><label>Progress<input type="number" min="0" max="100" value={form.progress} onChange={(event) => setForm({ ...form, progress: event.target.value })} /></label><label>Budget<input type="number" min="0" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></label><label>Leads<input type="number" min="0" value={form.leadsCount} onChange={(event) => setForm({ ...form, leadsCount: event.target.value })} /></label><label>Channels<input value={form.channels} onChange={(event) => setForm({ ...form, channels: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save campaign</button></form><div className="campaignList">{items.map((campaign) => <CampaignRow campaign={campaign} key={campaign.id} onSchedule={() => updateCampaign(campaign.id, 'Scheduled')} onDelete={() => deleteCampaign(campaign.id)} />)}</div></div></Panel><PublishingQueue /><Panel icon={ShieldCheck} title="Approval Queue" action="Approve"><ApprovalList tenantId={tenantId} canApprove={canApprove} /></Panel></section>;
 }
 
 function Leads({ tenantId }) {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ company: '', contactName: '', email: '', score: 50, source: 'Website', stage: 'New', nextAction: '' });
+  const [csv, setCsv] = useState('company,contact_name,email,score,source,stage,next_action\n');
+  const [message, setMessage] = useState('');
   useEffect(() => { loadLeads(); }, [tenantId]);
   async function loadLeads() {
     const result = await api(`/api/leads?tenantId=${tenantId}`);
@@ -463,7 +481,23 @@ function Leads({ tenantId }) {
     await api(`/api/leads/${id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
     setItems((current) => current.filter((item) => item.id !== id));
   }
-  return <section className="contentGrid"><Panel wide icon={Target} title="Lead Capture & Qualification" action="Sync leads"><div className="moduleGrid"><form className="agentForm" onSubmit={createLead}><h3>Create Lead</h3><label>Company<input value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} required /></label><label>Contact<input value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} required /></label><label>Email<input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Score<input type="number" min="0" max="100" value={form.score} onChange={(event) => setForm({ ...form, score: event.target.value })} /></label><label>Source<input value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>New</option><option>Qualified</option><option>Proposal</option><option>Won</option></select></label><label>Next action<input value={form.nextAction} onChange={(event) => setForm({ ...form, nextAction: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save lead</button></form><div className="leadTable">{items.map((lead) => <article className="leadTableRow" key={lead.id}><div className="leadScore">{lead.score}</div><div><h3>{lead.company}</h3><p>{lead.contactName} · {lead.source || lead.email || 'No source'}</p></div><span>{lead.stage}</span><strong>{lead.nextAction || 'No action'}</strong><div className="miniActions"><button onClick={() => updateLead(lead.id, 'Qualified')}>Qualify</button><button className="dangerButton" onClick={() => deleteLead(lead.id)}><Trash2 size={14} /></button></div></article>)}</div></div></Panel><PublishingQueue /></section>;
+  async function importLeads(event) {
+    event.preventDefault();
+    const result = await api('/api/leads/import', { method: 'POST', body: JSON.stringify({ tenantId, csv }) });
+    setMessage(`Imported ${result.imported} lead(s)`);
+    await loadLeads();
+  }
+  async function exportLeads() {
+    const result = await fetch(`${API_BASE_URL}/api/leads/export?tenantId=${tenantId}`, { headers: { authorization: `Bearer ${localStorage.getItem(TOKEN_KEY)}` } });
+    setCsv(await result.text());
+    setMessage('CSV export loaded below');
+  }
+  async function convertLead(id) {
+    const result = await api(`/api/leads/${id}/convert`, { method: 'POST', body: JSON.stringify({ tenantId }) });
+    setMessage(`Converted to customer: ${result.customer.name}`);
+    await loadLeads();
+  }
+  return <section className="contentGrid"><Panel wide icon={Target} title="Lead Capture & Qualification" action="Sync leads">{message && <div className="statusStrip"><strong>{message}</strong><span>Lead operations are audited</span></div>}<div className="moduleGrid"><form className="agentForm" onSubmit={createLead}><h3>Create Lead</h3><label>Company<input value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} required /></label><label>Contact<input value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} required /></label><label>Email<input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Score<input type="number" min="0" max="100" value={form.score} onChange={(event) => setForm({ ...form, score: event.target.value })} /></label><label>Source<input value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>New</option><option>Qualified</option><option>Proposal</option><option>Won</option></select></label><label>Next action<input value={form.nextAction} onChange={(event) => setForm({ ...form, nextAction: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save lead</button></form><div className="leadTable">{items.map((lead) => <article className="leadTableRow" key={lead.id}><div className="leadScore">{lead.score}</div><div><h3>{lead.company}</h3><p>{lead.contactName} · {lead.source || lead.email || 'No source'}</p></div><span>{lead.stage}</span><strong>{lead.nextAction || 'No action'}</strong><div className="miniActions"><button onClick={() => updateLead(lead.id, 'Qualified')}>Qualify</button><button onClick={() => convertLead(lead.id)}>Convert</button><button className="dangerButton" onClick={() => deleteLead(lead.id)}><Trash2 size={14} /></button></div></article>)}</div></div></Panel><Panel icon={FileCheck2} title="Import / Export" action="CSV"><form className="agentForm" onSubmit={importLeads}><label>Lead CSV<textarea rows="8" value={csv} onChange={(event) => setCsv(event.target.value)} /></label><div className="formActions"><button className="secondaryButton" type="button" onClick={exportLeads}><FileCheck2 size={16} /> Export</button><button className="primaryButton" type="submit"><Plus size={16} /> Import</button></div></form></Panel></section>;
 }
 
 function FollowUps({ tenantId }) {
@@ -522,6 +556,8 @@ function AgentAdmin({ tenantId, isAdmin }) {
   const [paperclipModels, setPaperclipModels] = useState([]);
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
   const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', dueAt: '', priority: 'Medium', channel: 'Email' });
+  const [jobs, setJobs] = useState([]);
+  const [jobForm, setJobForm] = useState({ name: 'Weekly campaign draft', schedule: 'Every Monday 09:00', nextRunAt: '', jobType: 'ai_workflow' });
   const selectedModel = agentForm.model || models[0]?.name || 'llama3.1:8b';
 
   useEffect(() => { refresh(); }, [tenantId]);
@@ -536,6 +572,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
     if (agentsResult.status === 'fulfilled') setAgents(agentsResult.value.agents || []);
     if (modelsResult.status === 'fulfilled') setModels(modelsResult.value.installed || modelsResult.value.models || []);
     if (paperclipModelsResult.status === 'fulfilled') setPaperclipModels(paperclipModelsResult.value.models || []);
+    if (!isAdmin) api(`/api/scheduled-jobs?tenantId=${tenantId}`).then((result) => setJobs(result.jobs || [])).catch(() => {});
     setStatus(paperclipResult.status === 'fulfilled' && paperclipResult.value.ok ? 'Paperclip connected' : `Paperclip unavailable: ${paperclipResult.reason?.message || paperclipResult.value?.error || 'check container logs'}`);
   }
 
@@ -598,6 +635,18 @@ function AgentAdmin({ tenantId, isAdmin }) {
     } catch (error) { setOutput(error.message); }
   }
 
+  async function createSchedule(event) {
+    event.preventDefault();
+    const result = await api('/api/scheduled-jobs', { method: 'POST', body: JSON.stringify({ ...jobForm, tenantId, payload: workflowForm }) });
+    setJobs((current) => [result.job, ...current]);
+    setStatus(`Scheduled ${result.job.name}`);
+  }
+
+  async function updateSchedule(job, status) {
+    const result = await api(`/api/scheduled-jobs/${job.id}`, { method: 'PATCH', body: JSON.stringify({ tenantId, status }) });
+    setJobs((current) => current.map((item) => item.id === job.id ? result.job : item));
+  }
+
   return <section className="contentGrid"><Panel wide icon={Bot} title="AI Agent Configuration" action={isAdmin ? 'Admin only' : 'Read only'}>
     <div className="statusStrip"><strong>{status}</strong><span>{models.length ? `${models.length} Ollama model(s), ${paperclipModels.length} mapped through Paperclip` : 'No Ollama models found yet'}</span></div>
     {!isAdmin && <div className="errorBox">Only the platform admin can create or modify Paperclip AI agent configuration.</div>}
@@ -627,13 +676,27 @@ function AgentAdmin({ tenantId, isAdmin }) {
         <button className="primaryButton" type="submit"><Bot size={16} /> Generate for approval</button>
         <div className="responseBox">{output || 'Workflow drafts and execution notes will appear here.'}</div>
       </form>}
+      {!isAdmin && <form className="agentForm" onSubmit={createSchedule}>
+        <h3>Schedule Agent Work</h3>
+        <label>Name<input value={jobForm.name} onChange={(event) => setJobForm({ ...jobForm, name: event.target.value })} /></label>
+        <label>Schedule<input value={jobForm.schedule} onChange={(event) => setJobForm({ ...jobForm, schedule: event.target.value })} /></label>
+        <label>Next run<input type="datetime-local" value={jobForm.nextRunAt} onChange={(event) => setJobForm({ ...jobForm, nextRunAt: event.target.value })} /></label>
+        <button className="primaryButton" type="submit"><CalendarDays size={16} /> Save schedule</button>
+        <div className="timeline">{jobs.map((job) => <div className="timeItem" key={job.id}><span className="time">{job.status}</span><div><strong>{job.name}</strong><p>{job.schedule} · {formatDue(job.nextRunAt)}</p><div className="miniActions"><button type="button" onClick={() => updateSchedule(job, job.status === 'Paused' ? 'Active' : 'Paused')}>{job.status === 'Paused' ? 'Resume' : 'Pause'}</button><button type="button" onClick={() => updateSchedule(job, 'Archived')}>Archive</button></div></div></div>)}</div>
+      </form>}
       <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
     </div>
   </Panel></section>;
 }
 
 function Settings({ tenant, user, systemStatus, tenantId, canManageEmail, canManageTenantBrand, isPlatformAdmin }) {
-  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><PasswordPanel /><ProfilePanel tenant={tenant} user={user} canManageTenant={canManageTenantBrand} /><EmailConfigPanel tenantId={tenantId} canManageEmail={canManageEmail} isPlatformAdmin={isPlatformAdmin} /></div></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><ObservabilityPanel tenantId={tenantId} /><PasswordPanel /><ProfilePanel tenant={tenant} user={user} canManageTenant={canManageTenantBrand} /><EmailConfigPanel tenantId={tenantId} canManageEmail={canManageEmail} isPlatformAdmin={isPlatformAdmin} /></div></Panel></section>;
+}
+
+function ObservabilityPanel({ tenantId }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { api(`/api/system/observability?tenantId=${tenantId}`).then(setData).catch(() => {}); }, [tenantId]);
+  return <div className="settingsList"><h3>Observability</h3><div className="settingRow"><span>Database</span><strong>{data?.services?.database?.ok ? 'Online' : 'Check'}</strong></div><div className="settingRow"><span>Ollama</span><strong>{data?.services?.ollama?.ok ? 'Online' : 'Check'}</strong></div><div className="settingRow"><span>Paperclip</span><strong>{data?.services?.paperclip?.ok ? 'Online' : 'Check'}</strong></div><div className="settingRow"><span>Audit events</span><strong>{data?.metrics?.auditEvents ?? '-'}</strong></div><div className="settingRow"><span>Pending approvals</span><strong>{data?.metrics?.pendingApprovals ?? '-'}</strong></div></div>;
 }
 
 function PasswordPanel() {
@@ -676,10 +739,23 @@ function ProfilePanel({ tenant, user, canManageTenant }) {
     }
   }
 
+  async function upload(event, purpose) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setMessage('Uploading image...');
+    try {
+      const url = await uploadImage(file, purpose);
+      setForm((current) => purpose === 'logo' ? { ...current, tenantLogoUrl: url } : { ...current, avatarUrl: url });
+      setMessage('Image uploaded. Save branding to apply it.');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
   return <form className="settingsList passwordPanel" onSubmit={submit}>
     <h3>Logo & Avatar</h3>
-    {canManageTenant && <label>Company logo URL<input value={form.tenantLogoUrl} onChange={(event) => setForm({ ...form, tenantLogoUrl: event.target.value })} placeholder="https://..." /></label>}
-    <label>Your avatar URL<input value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} placeholder="https://..." /></label>
+    {canManageTenant && <label>Company logo URL<input value={form.tenantLogoUrl} onChange={(event) => setForm({ ...form, tenantLogoUrl: event.target.value })} placeholder="https://..." /><input type="file" accept="image/*" onChange={(event) => upload(event, 'logo')} /></label>}
+    <label>Your avatar URL<input value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} placeholder="https://..." /><input type="file" accept="image/*" onChange={(event) => upload(event, 'avatar')} /></label>
     {message && <small>{message}</small>}
     <button className="primaryButton" type="submit"><Check size={16} /> Save branding</button>
   </form>;
@@ -734,7 +810,7 @@ function EmailConfigPanel({ tenantId, canManageEmail, isPlatformAdmin }) {
   </form>;
 }
 
-function ApprovalList({ tenantId }) {
+function ApprovalList({ tenantId, canApprove = true }) {
   const [items, setItems] = useState([]);
   useEffect(() => { api(`/api/approvals?tenantId=${tenantId}`).then((result) => setItems(result.approvals || [])).catch(() => {}); }, [tenantId]);
   async function decide(id, status) {
@@ -742,7 +818,7 @@ function ApprovalList({ tenantId }) {
     const result = await api(`/api/approvals?tenantId=${tenantId}`);
     setItems(result.approvals || []);
   }
-  return <div className="approvalList">{items.map((approval) => <article className="approvalItem" key={approval.id}><div><strong>{approval.title}</strong><p>{approval.agent || 'System'} · {approval.status}{approval.actionType ? ` · ${approval.actionType}` : ''}</p>{approval.executionResult && <small>{approval.executionResult.executed ? 'Executed' : 'Not executed'}{approval.executionResult.reason ? `: ${approval.executionResult.reason}` : ''}</small>}</div><span className={approval.risk === 'High' ? 'badge danger' : 'badge'}>{approval.risk}</span>{approval.status === 'pending' && <div className="approvalActions"><button onClick={() => decide(approval.id, 'approved')}>Approve & execute</button><button onClick={() => decide(approval.id, 'rejected')}>Reject</button></div>}</article>)}</div>;
+  return <div className="approvalList">{items.map((approval) => <article className="approvalItem" key={approval.id}><div><strong>{approval.title}</strong><p>{approval.agent || 'System'} · {approval.status}{approval.actionType ? ` · ${approval.actionType}` : ''}</p>{approval.executionResult && <small>{approval.executionResult.executed ? 'Executed' : 'Not executed'}{approval.executionResult.reason ? `: ${approval.executionResult.reason}` : ''}</small>}</div><span className={approval.risk === 'High' ? 'badge danger' : 'badge'}>{approval.risk}</span>{canApprove && approval.status === 'pending' && <div className="approvalActions"><button onClick={() => decide(approval.id, 'approved')}>Approve & execute</button><button onClick={() => decide(approval.id, 'rejected')}>Reject</button></div>}</article>)}</div>;
 }
 
 function CampaignRow({ campaign, onSchedule, onDelete }) {

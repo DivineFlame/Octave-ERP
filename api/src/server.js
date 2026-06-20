@@ -3,7 +3,9 @@ import cors from 'cors';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import pg from 'pg';
-import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 const { Pool } = pg;
 
@@ -13,6 +15,8 @@ const defaultTenantId = process.env.DEFAULT_TENANT_ID || 'northstar';
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
 const paperclipBaseUrl = process.env.PAPERCLIP_BASE_URL || 'http://paperclip';
 const appSecret = process.env.APP_SECRET || 'change-this-octave-secret';
+const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+const loginAttempts = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -32,7 +36,9 @@ app.use(cors({
     return callback(new Error(`Origin ${origin} is not allowed by CORS`));
   }
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
+if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true });
+app.use('/uploads', express.static(uploadDir));
 
 app.get('/health', async (_req, res) => {
   const db = await checkDatabase();
@@ -43,7 +49,7 @@ app.get('/health', async (_req, res) => {
   });
 });
 
-app.post('/api/auth/login', async (req, res, next) => {
+app.post('/api/auth/login', rateLimit('login', 12, 15 * 60 * 1000), async (req, res, next) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -99,7 +105,7 @@ app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/forgot-password', async (req, res, next) => {
+app.post('/api/auth/forgot-password', rateLimit('forgot-password', 6, 15 * 60 * 1000), async (req, res, next) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ ok: false, error: 'email is required' });
   try {
@@ -167,6 +173,36 @@ app.get('/api/system/status', requireAuth, async (_req, res) => {
     paperclip,
     publicAppUrl: process.env.PUBLIC_APP_URL || null
   });
+});
+
+app.get('/api/system/observability', requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageTenantUsers(req.user, getScopedTenantId(req))) {
+      return res.status(403).json({ ok: false, error: 'Admin access required' });
+    }
+    const tenantId = getScopedTenantId(req);
+    const [database, ollama, paperclip, audits, emails, pending, jobs] = await Promise.all([
+      checkDatabase(),
+      getOllamaTags(),
+      checkPaperclip(),
+      pool.query('select count(*)::int as count from audit_logs where tenant_id = $1 or $2 = true', [tenantId, isPlatformAdmin(req.user)]),
+      pool.query('select status, count(*)::int as count from email_delivery_logs where tenant_id = $1 or $2 = true group by status', [tenantId, isPlatformAdmin(req.user)]),
+      pool.query("select count(*)::int as count from approvals where tenant_id = $1 and status = 'pending'", [tenantId]),
+      pool.query('select status, count(*)::int as count from scheduled_jobs where tenant_id = $1 group by status', [tenantId])
+    ]);
+    res.json({
+      ok: database.ok && ollama.ok && paperclip.ok,
+      services: { database, ollama, paperclip },
+      metrics: {
+        auditEvents: audits.rows[0]?.count || 0,
+        pendingApprovals: pending.rows[0]?.count || 0,
+        emailDeliveries: Object.fromEntries(emails.rows.map((row) => [row.status, row.count])),
+        scheduledJobs: Object.fromEntries(jobs.rows.map((row) => [row.status, row.count]))
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/tenants', requireAuth, async (req, res, next) => {
@@ -475,7 +511,7 @@ app.put('/api/email/config', requireAuth, async (req, res, next) => {
        returning id, tenant_id as "tenantId", smtp_host as "smtpHost", smtp_port as "smtpPort",
                  smtp_secure as "smtpSecure", smtp_user as "smtpUser", smtp_pass as "smtpPass",
                  from_email as "fromEmail", from_name as "fromName", enabled`,
-      [tenantId || '__platform__', config.smtpHost, config.smtpPort, config.smtpSecure, config.smtpUser, config.smtpPass || null, config.fromEmail, config.fromName, config.enabled, req.user.id]
+      [tenantId || '__platform__', config.smtpHost, config.smtpPort, config.smtpSecure, config.smtpUser, config.smtpPass ? encryptSecret(config.smtpPass) : null, config.fromEmail, config.fromName, config.enabled, req.user.id]
     );
     res.json({ ok: true, config: maskEmailConfig(result.rows[0], tenantId) });
   } catch (error) {
@@ -553,6 +589,29 @@ app.patch('/api/settings/profile', requireAuth, async (req, res, next) => {
     if (avatarUrl) await pool.query('update app_users set avatar_url = $2, updated_at = now() where id = $1', [req.user.id, avatarUrl]);
     const refreshed = await loadUserById(req.user.id);
     res.json({ ok: true, user: refreshed });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/uploads', requireAuth, async (req, res, next) => {
+  try {
+    const purpose = cleanString(req.body?.purpose) || 'asset';
+    if (!['logo', 'avatar', 'asset'].includes(purpose)) return res.status(400).json({ ok: false, error: 'purpose must be logo, avatar, or asset' });
+    const dataUrl = String(req.body?.dataUrl || '');
+    const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([a-z0-9+/=]+)$/i);
+    if (!match) return res.status(400).json({ ok: false, error: 'dataUrl must be a base64 image data URL' });
+    const ext = match[1].includes('png') ? '.png' : match[1].includes('webp') ? '.webp' : match[1].includes('gif') ? '.gif' : '.jpg';
+    const bytes = Buffer.from(match[2], 'base64');
+    if (bytes.length > 3 * 1024 * 1024) return res.status(400).json({ ok: false, error: 'image must be 3MB or smaller' });
+    const tenantId = getScopedTenantId(req);
+    const tenantDir = join(uploadDir, tenantId);
+    if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
+    const filename = `${purpose}-${Date.now()}-${randomBytes(4).toString('hex')}${ext}`;
+    writeFileSync(join(tenantDir, filename), bytes);
+    const url = `/uploads/${tenantId}/${filename}`;
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'asset.upload', entityType: purpose, entityId: filename, details: { bytes: bytes.length, mimeType: match[1] } });
+    res.status(201).json({ ok: true, url });
   } catch (error) {
     next(error);
   }
@@ -774,6 +833,79 @@ app.delete('/api/leads/:id', requireAuth, async (req, res, next) => {
   }
 });
 
+app.get('/api/leads/export', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select company, contact_name, email, score, source, stage, next_action
+         from leads
+        where tenant_id = $1
+        order by updated_at desc, created_at desc`,
+      [tenantId]
+    );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'lead.export', entityType: 'lead' });
+    res.setHeader('content-type', 'text/csv');
+    res.setHeader('content-disposition', 'attachment; filename="octave-leads.csv"');
+    res.send(toCsv(result.rows, ['company', 'contact_name', 'email', 'score', 'source', 'stage', 'next_action']));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/leads/import', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const rows = parseCsv(String(req.body?.csv || '')).slice(0, 500);
+    let imported = 0;
+    for (const row of rows) {
+      const data = normalizeLead({
+        company: row.company,
+        contactName: row.contact_name || row.contactName,
+        email: row.email,
+        score: row.score,
+        source: row.source || 'CSV import',
+        stage: row.stage || 'New',
+        nextAction: row.next_action || row.nextAction
+      });
+      if (!data.company || !data.contactName) continue;
+      await pool.query(
+        `insert into leads (tenant_id, company, contact_name, email, score, source, stage, owner_user_id, next_action)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         on conflict do nothing`,
+        [tenantId, data.company, data.contactName, data.email, data.score, data.source, data.stage, req.user.id, data.nextAction]
+      );
+      imported += 1;
+    }
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'lead.import', entityType: 'lead', details: { imported } });
+    res.status(201).json({ ok: true, imported });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/leads/:id/convert', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const lead = await pool.query('select * from leads where id = $1 and tenant_id = $2', [req.params.id, tenantId]);
+    if (!lead.rowCount) return res.status(404).json({ ok: false, error: 'lead not found' });
+    const row = lead.rows[0];
+    const result = await pool.query(
+      `insert into customers (tenant_id, name, health, plan, mrr, status)
+       values ($1,$2,$3,$4,$5,$6)
+       returning id, name, health, plan, mrr, status, created_at as "createdAt"`,
+      [tenantId, row.company, boundedInt(req.body?.health, 0, 100, 75), cleanString(req.body?.plan) || 'Starter', boundedNumber(req.body?.mrr, 0), 'Converted lead']
+    );
+    await pool.query('update leads set stage = $3, updated_at = now() where id = $1 and tenant_id = $2', [req.params.id, tenantId, 'Won']);
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'lead.convert', entityType: 'customer', entityId: result.rows[0].id, details: { leadId: req.params.id, company: row.company } });
+    res.status(201).json({ ok: true, customer: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/customers', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
@@ -839,6 +971,51 @@ app.delete('/api/customers/:id', requireAuth, async (req, res, next) => {
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'customer not found' });
     await logAudit({ tenantId, actorUserId: req.user.id, action: 'customer.delete', entityType: 'customer', entityId: result.rows[0].id, details: { name: result.rows[0].name } });
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/crm/notes', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const entityType = cleanString(req.query.entityType);
+    const entityId = cleanString(req.query.entityId);
+    const result = await pool.query(
+      `select n.id, n.entity_type as "entityType", n.entity_id as "entityId", n.note,
+              n.created_at as "createdAt", u.name as author
+         from crm_notes n
+         left join app_users u on u.id = n.created_by
+        where n.tenant_id = $1
+          and ($2::text is null or n.entity_type = $2)
+          and ($3::text is null or n.entity_id = $3)
+        order by n.created_at desc
+        limit 100`,
+      [tenantId, entityType || null, entityId || null]
+    );
+    res.json({ ok: true, notes: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/crm/notes', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const entityType = cleanString(req.body?.entityType);
+    const entityId = cleanString(req.body?.entityId);
+    const note = cleanString(req.body?.note);
+    if (!entityType || !entityId || !note) return res.status(400).json({ ok: false, error: 'entityType, entityId, and note are required' });
+    const result = await pool.query(
+      `insert into crm_notes (tenant_id, entity_type, entity_id, note, created_by)
+       values ($1,$2,$3,$4,$5)
+       returning id, entity_type as "entityType", entity_id as "entityId", note, created_at as "createdAt"`,
+      [tenantId, entityType, entityId, note, req.user.id]
+    );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'crm.note_create', entityType, entityId, details: { note: note.slice(0, 120) } });
+    res.status(201).json({ ok: true, note: { ...result.rows[0], author: req.user.name } });
   } catch (error) {
     next(error);
   }
@@ -914,6 +1091,72 @@ app.delete('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
   }
 });
 
+app.get('/api/scheduled-jobs', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select id, name, job_type as "jobType", schedule, payload, status,
+              next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"
+         from scheduled_jobs
+        where tenant_id = $1
+        order by next_run_at nulls last, created_at desc`,
+      [tenantId]
+    );
+    res.json({ ok: true, jobs: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/scheduled-jobs', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const name = cleanString(req.body?.name);
+    const jobType = cleanString(req.body?.jobType) || 'ai_workflow';
+    const schedule = cleanString(req.body?.schedule) || 'manual';
+    const nextRunAt = cleanString(req.body?.nextRunAt) || null;
+    const payload = req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : {};
+    if (!name) return res.status(400).json({ ok: false, error: 'job name is required' });
+    const result = await pool.query(
+      `insert into scheduled_jobs (tenant_id, name, job_type, schedule, payload, status, next_run_at, created_by)
+       values ($1,$2,$3,$4,$5::jsonb,'Active',$6,$7)
+       returning id, name, job_type as "jobType", schedule, payload, status,
+                 next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"`,
+      [tenantId, name, jobType, schedule, JSON.stringify(payload), nextRunAt, req.user.id]
+    );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'schedule.create', entityType: 'scheduled_job', entityId: result.rows[0].id, details: { name, jobType, schedule } });
+    res.status(201).json({ ok: true, job: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/scheduled-jobs/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const status = cleanString(req.body?.status);
+    if (status && !['Active', 'Paused', 'Archived'].includes(status)) return res.status(400).json({ ok: false, error: 'status must be Active, Paused, or Archived' });
+    const result = await pool.query(
+      `update scheduled_jobs
+          set status = coalesce($3, status),
+              next_run_at = coalesce($4, next_run_at),
+              updated_at = now()
+        where id = $1 and tenant_id = $2
+        returning id, name, job_type as "jobType", schedule, payload, status,
+                  next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"`,
+      [req.params.id, tenantId, status || null, cleanString(req.body?.nextRunAt) || null]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'scheduled job not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'schedule.update', entityType: 'scheduled_job', entityId: result.rows[0].id, details: { status: result.rows[0].status } });
+    res.json({ ok: true, job: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/social/accounts', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
@@ -948,12 +1191,12 @@ app.post('/api/social/accounts', requireAuth, async (req, res, next) => {
        values ($1,$2,$3,$4::jsonb,$5,$6)
        on conflict (tenant_id, platform) do update
           set handle = excluded.handle,
-              credentials = social_accounts.credentials || excluded.credentials,
+              credentials = excluded.credentials,
               status = excluded.status,
               updated_at = now()
        returning id, tenant_id as "tenantId", platform, handle, credentials, status,
                  created_at as "createdAt", updated_at as "updatedAt"`,
-      [tenantId, platform, handle, JSON.stringify(credentials), status, req.user.id]
+      [tenantId, platform, handle, JSON.stringify(encryptJson(credentials)), status, req.user.id]
     );
     await logAudit({ tenantId, actorUserId: req.user.id, action: 'social_account.upsert', entityType: 'social_account', entityId: result.rows[0].id, details: { platform, handle, status, credentialKeys: Object.keys(credentials) } });
     res.status(201).json({ ok: true, account: maskSocialAccount(result.rows[0]) });
@@ -1248,6 +1491,9 @@ app.patch('/api/approvals/:id', requireAuth, async (req, res, next) => {
   if (isPlatformAdmin(req.user)) {
     return res.status(403).json({ ok: false, error: 'Platform admins cannot decide tenant approvals' });
   }
+  if (!canDecideApprovals(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Approver or tenant admin access required' });
+  }
   const status = req.body?.status;
   if (!['approved', 'rejected', 'pending'].includes(status)) {
     return res.status(400).json({ ok: false, error: 'status must be approved, rejected, or pending' });
@@ -1497,6 +1743,29 @@ async function ensureSchema() {
       provider_message_id text,
       error text,
       created_at timestamptz not null default now()
+    );
+    create table if not exists crm_notes (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      entity_type text not null,
+      entity_id text not null,
+      note text not null,
+      created_by uuid references app_users(id) on delete set null,
+      created_at timestamptz not null default now()
+    );
+    create table if not exists scheduled_jobs (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      name text not null,
+      job_type text not null default 'ai_workflow',
+      schedule text not null default 'manual',
+      payload jsonb not null default '{}'::jsonb,
+      status text not null default 'Active',
+      next_run_at timestamptz,
+      last_run_at timestamptz,
+      created_by uuid references app_users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     );
   `);
 
@@ -1960,7 +2229,7 @@ async function sendMailWithConfig({ tenantId, to, subject, text, html }) {
       host: config.smtpHost,
       port: Number(config.smtpPort || 587),
       secure: Boolean(config.smtpSecure),
-      auth: config.smtpUser ? { user: config.smtpUser, pass: config.smtpPass || '' } : undefined
+      auth: config.smtpUser ? { user: config.smtpUser, pass: decryptSecret(config.smtpPass) || '' } : undefined
     });
     const info = await transporter.sendMail({
       from: `"${config.fromName || 'Octave CRM'}" <${config.fromEmail}>`,
@@ -2151,6 +2420,10 @@ function canManageTenantUsers(user, tenantId) {
   return isPlatformAdmin(user) || (user.tenantId === tenantId && user.platformRole === 'tenant_admin');
 }
 
+function canDecideApprovals(user) {
+  return user?.platformRole === 'tenant_admin' || user?.platformRole === 'approver';
+}
+
 function isPlatformAdmin(user) {
   return user?.platformRole === 'platform_admin';
 }
@@ -2194,7 +2467,7 @@ function normalizeCredentials(input = {}) {
 }
 
 function maskSocialAccount(row) {
-  const credentials = row.credentials && typeof row.credentials === 'object' ? row.credentials : {};
+  const credentials = decryptJson(row.credentials);
   return {
     id: row.id,
     tenantId: row.tenantId,
@@ -2206,6 +2479,107 @@ function maskSocialAccount(row) {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
+}
+
+function encryptionKey() {
+  return createHash('sha256').update(appSecret).digest();
+}
+
+function encryptSecret(value) {
+  if (!value) return value;
+  if (String(value).startsWith('enc:v1:')) return value;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
+}
+
+function decryptSecret(value) {
+  if (!value || !String(value).startsWith('enc:v1:')) return value || '';
+  try {
+    const [, , ivRaw, tagRaw, dataRaw] = String(value).split(':');
+    const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivRaw, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(dataRaw, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function encryptJson(value = {}) {
+  return { __encrypted: true, value: encryptSecret(JSON.stringify(value || {})) };
+}
+
+function decryptJson(value = {}) {
+  if (!value || typeof value !== 'object') return {};
+  if (value.__encrypted) {
+    try {
+      return JSON.parse(decryptSecret(value.value) || '{}');
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+function rateLimit(scope, max, windowMs) {
+  return (req, res, next) => {
+    const key = `${scope}:${req.ip}:${String(req.body?.email || '').toLowerCase()}`;
+    const now = Date.now();
+    const entry = loginAttempts.get(key) || { count: 0, resetAt: now + windowMs };
+    if (entry.resetAt < now) {
+      entry.count = 0;
+      entry.resetAt = now + windowMs;
+    }
+    entry.count += 1;
+    loginAttempts.set(key, entry);
+    if (entry.count > max) {
+      return res.status(429).json({ ok: false, error: 'Too many attempts. Try again later.' });
+    }
+    next();
+  };
+}
+
+function toCsv(rows, fields) {
+  return [
+    fields.join(','),
+    ...rows.map((row) => fields.map((field) => csvCell(row[field])).join(','))
+  ].join('\n');
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function parseCsv(csv) {
+  const lines = String(csv || '').split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+  const headers = splitCsvLine(lines[0]).map((item) => item.trim());
+  return lines.slice(1).map((line) => Object.fromEntries(splitCsvLine(line).map((value, index) => [headers[index], value.trim()])));
+}
+
+function splitCsvLine(line) {
+  const values = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      values.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  values.push(current);
+  return values;
 }
 
 function signToken(payload) {

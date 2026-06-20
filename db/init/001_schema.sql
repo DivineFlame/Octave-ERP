@@ -178,6 +178,31 @@ create table if not exists email_delivery_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists crm_notes (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null references tenants(id) on delete cascade,
+  entity_type text not null,
+  entity_id text not null,
+  note text not null,
+  created_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists scheduled_jobs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null references tenants(id) on delete cascade,
+  name text not null,
+  job_type text not null default 'ai_workflow',
+  schedule text not null default 'manual',
+  payload jsonb not null default '{}'::jsonb,
+  status text not null default 'Active',
+  next_run_at timestamptz,
+  last_run_at timestamptz,
+  created_by uuid references app_users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 insert into tenants (id, name, plan, status)
 values
   ('northstar', 'Northstar Wellness', 'Growth', 'Active'),

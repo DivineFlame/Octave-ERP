@@ -26,6 +26,9 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://38.247.188.228:3002}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://38.247.188.228:3002}
       APP_SECRET: ${APP_SECRET:-change-this-octave-secret}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads-data:/app/uploads
     ports:
       - "3200:3000"
     depends_on:
@@ -79,3 +82,4 @@ services:
 volumes:
   postgres-data:
   ollama-data:
+  uploads-data:

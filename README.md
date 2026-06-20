@@ -141,9 +141,16 @@ This repository currently ships:
 - Password reset tokens, audit logs, and email delivery logs
 - Admin/tenant-admin user activation, deactivation, and deletion controls
 - Audit trail coverage for tenant, user, campaign, lead, customer, follow-up, social account, AI workflow, and approval actions
+- AES-GCM encryption for newly saved SMTP passwords and social media credentials using `APP_SECRET`
+- Local persistent upload storage for tenant logos, user avatars, and image assets
+- CSV lead import/export and lead-to-customer conversion
+- CRM notes/timeline records for leads, customers, and related entities
+- Scheduled AI job records for recurring workflow planning
+- Production observability endpoint for service status, email, audit, approval, and schedule counts
+- Backup/restore helper scripts for PostgreSQL
 - Dokploy-compatible Docker/nginx deployment
 
-Channel-specific publishing integrations should be attached next.
+Channel-specific live publishing integrations still require provider OAuth/API approval for Meta, LinkedIn, X, YouTube, or other networks. The app now has the credential vault, social account registry, approval queue, and audit foundation needed to attach those connectors safely.
 
 ## Backend API
 
@@ -166,10 +173,12 @@ The included API service exposes:
 - `POST /api/admin/users/:id/password`
 - `GET /api/admin/audit-logs`
 - `GET /api/admin/email-logs`
+- `GET /api/system/observability`
 - `GET /api/email/config`
 - `PUT /api/email/config`
 - `POST /api/email/test`
 - `PATCH /api/settings/profile`
+- `POST /api/uploads`
 - `GET /api/social/accounts`
 - `POST /api/social/accounts`
 - `DELETE /api/social/accounts/:id`
@@ -198,8 +207,16 @@ The included API service exposes:
 - `DELETE /api/campaigns/:id`
 - `GET /api/leads`
 - `POST /api/leads`
+- `GET /api/leads/export`
+- `POST /api/leads/import`
+- `POST /api/leads/:id/convert`
 - `PATCH /api/leads/:id`
 - `DELETE /api/leads/:id`
+- `GET /api/crm/notes`
+- `POST /api/crm/notes`
+- `GET /api/scheduled-jobs`
+- `POST /api/scheduled-jobs`
+- `PATCH /api/scheduled-jobs/:id`
 - `GET /api/follow-ups`
 - `POST /api/follow-ups`
 - `PATCH /api/follow-ups/:id`
@@ -210,3 +227,23 @@ The included API service exposes:
 - `DELETE /api/customers/:id`
 
 PostgreSQL schema and seed data live in `db/init/001_schema.sql`.
+
+## Production Maintenance
+
+Back up PostgreSQL from the Dokploy host:
+
+```bash
+scripts/backup-postgres.sh
+```
+
+Restore a backup:
+
+```bash
+scripts/restore-postgres.sh ./backups/octave-crm-YYYYMMDD-HHMMSS.sql
+```
+
+Run a basic deployment smoke check:
+
+```bash
+SMOKE_BASE_URL=http://38.247.188.228:3002 npm run smoke
+```
