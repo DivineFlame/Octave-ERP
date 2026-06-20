@@ -597,6 +597,13 @@ p, small, .muted { color: var(--muted); }
   align-items: start;
 }
 
+.moduleGrid {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 13px;
+  align-items: start;
+}
+
 .agentForm {
   display: grid;
   gap: 10px;
@@ -799,7 +806,7 @@ p, small, .muted { color: var(--muted); }
   .sidebar { align-items: center; padding: 18px 12px; }
   .navItem { justify-content: center; padding: 0; }
   .approvalPanel { justify-content: center; padding: 12px; }
-  .heroBand, .agentLayout { grid-template-columns: 1fr; }
+  .heroBand, .agentLayout, .moduleGrid { grid-template-columns: 1fr; }
   .adminGrid { grid-template-columns: 1fr; }
   .statsGrid, .stageGrid, .taskBoard, .customerGrid, .settingsGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

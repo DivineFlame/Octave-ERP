@@ -114,10 +114,10 @@ If `http://38.247.188.228:3002/` refuses the connection, the `App` container is 
 This repository currently ships:
 
 - Multi-tenant and multi-user workspace controls
-- Digital and social media marketing module
-- Lead generation and qualification module
-- Follow-up workbench
-- Customer relationship dashboard
+- Database-backed digital and social media marketing campaign module
+- Database-backed lead generation and qualification module
+- Database-backed follow-up workbench
+- Database-backed customer relationship dashboard
 - Admin AI-agent configuration for Paperclip and Ollama
 - Platform-admin company and tenant-user creation
 - Login-based tenant isolation
@@ -134,6 +134,7 @@ This repository currently ships:
 - Bundled platform logo, tenant logo URL, and user avatar URL support
 - Platform and tenant SMTP configuration with credential email delivery
 - One-click agentic framework activation for default Paperclip/Ollama agents
+- Tenant-scoped CRUD APIs for campaigns, leads, follow-up tasks, and customers
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -177,5 +178,22 @@ The included API service exposes:
 - `POST /api/approvals`
 - `PATCH /api/approvals/:id`
 - `GET /api/system/status`
+- `GET /api/dashboard/summary`
+- `GET /api/campaigns`
+- `POST /api/campaigns`
+- `PATCH /api/campaigns/:id`
+- `DELETE /api/campaigns/:id`
+- `GET /api/leads`
+- `POST /api/leads`
+- `PATCH /api/leads/:id`
+- `DELETE /api/leads/:id`
+- `GET /api/follow-ups`
+- `POST /api/follow-ups`
+- `PATCH /api/follow-ups/:id`
+- `DELETE /api/follow-ups/:id`
+- `GET /api/customers`
+- `POST /api/customers`
+- `PATCH /api/customers/:id`
+- `DELETE /api/customers/:id`
 
 PostgreSQL schema and seed data live in `db/init/001_schema.sql`.

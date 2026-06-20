@@ -418,6 +418,311 @@ app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, ne
   }
 });
 
+app.get('/api/dashboard/summary', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  const tenantId = getScopedTenantId(req);
+  try {
+    const [campaigns, leads, approvals, tasks] = await Promise.all([
+      pool.query('select count(*)::int as count from campaigns where tenant_id = $1', [tenantId]),
+      pool.query('select count(*)::int as count from leads where tenant_id = $1', [tenantId]),
+      pool.query("select count(*)::int as count from approvals where tenant_id = $1 and status = 'pending'", [tenantId]),
+      pool.query("select count(*)::int as count from follow_up_tasks where tenant_id = $1 and status <> 'Done'", [tenantId])
+    ]);
+    res.json({
+      ok: true,
+      summary: {
+        campaigns: campaigns.rows[0].count,
+        leads: leads.rows[0].count,
+        approvals: approvals.rows[0].count,
+        tasks: tasks.rows[0].count
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/campaigns', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select c.id, c.name, c.stage, c.progress, c.budget, c.leads_count as "leadsCount",
+              c.channels, c.created_at as "createdAt", c.updated_at as "updatedAt",
+              coalesce(u.name, 'Unassigned') as owner
+         from campaigns c
+         left join app_users u on u.id = c.owner_user_id
+        where c.tenant_id = $1
+        order by c.updated_at desc, c.created_at desc`,
+      [tenantId]
+    );
+    res.json({ ok: true, campaigns: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/campaigns', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const data = normalizeCampaign(req.body);
+    if (!data.name) return res.status(400).json({ ok: false, error: 'campaign name is required' });
+    const result = await pool.query(
+      `insert into campaigns (tenant_id, name, owner_user_id, stage, progress, budget, leads_count, channels)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       returning id, name, stage, progress, budget, leads_count as "leadsCount", channels,
+                 created_at as "createdAt", updated_at as "updatedAt"`,
+      [tenantId, data.name, req.user.id, data.stage, data.progress, data.budget, data.leadsCount, data.channels]
+    );
+    res.status(201).json({ ok: true, campaign: { ...result.rows[0], owner: req.user.name } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/campaigns/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const data = normalizeCampaignPatch(req.body);
+    const result = await pool.query(
+      `update campaigns
+          set name = coalesce($3, name),
+              stage = coalesce($4, stage),
+              progress = coalesce($5, progress),
+              budget = coalesce($6, budget),
+              leads_count = coalesce($7, leads_count),
+              channels = coalesce($8, channels),
+              updated_at = now()
+        where id = $1 and tenant_id = $2
+        returning id, name, stage, progress, budget, leads_count as "leadsCount", channels,
+                  created_at as "createdAt", updated_at as "updatedAt"`,
+      [req.params.id, tenantId, data.name, data.stage, data.progress, data.budget, data.leadsCount, data.channels]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'campaign not found' });
+    res.json({ ok: true, campaign: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/campaigns/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query('delete from campaigns where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'campaign not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/leads', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query(
+      `select id, company, contact_name as "contactName", email, score, source, stage,
+              next_action as "nextAction", created_at as "createdAt", updated_at as "updatedAt"
+         from leads
+        where tenant_id = $1
+        order by updated_at desc, created_at desc`,
+      [getScopedTenantId(req)]
+    );
+    res.json({ ok: true, leads: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/leads', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const data = normalizeLead(req.body);
+    if (!data.company || !data.contactName) return res.status(400).json({ ok: false, error: 'company and contact name are required' });
+    const result = await pool.query(
+      `insert into leads (tenant_id, company, contact_name, email, score, source, stage, owner_user_id, next_action)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       returning id, company, contact_name as "contactName", email, score, source, stage,
+                 next_action as "nextAction", created_at as "createdAt", updated_at as "updatedAt"`,
+      [tenantId, data.company, data.contactName, data.email, data.score, data.source, data.stage, req.user.id, data.nextAction]
+    );
+    res.status(201).json({ ok: true, lead: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/leads/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const data = normalizeLeadPatch(req.body);
+    const result = await pool.query(
+      `update leads
+          set company = coalesce($3, company),
+              contact_name = coalesce($4, contact_name),
+              email = coalesce($5, email),
+              score = coalesce($6, score),
+              source = coalesce($7, source),
+              stage = coalesce($8, stage),
+              next_action = coalesce($9, next_action),
+              updated_at = now()
+        where id = $1 and tenant_id = $2
+        returning id, company, contact_name as "contactName", email, score, source, stage,
+                  next_action as "nextAction", created_at as "createdAt", updated_at as "updatedAt"`,
+      [req.params.id, getScopedTenantId(req), data.company, data.contactName, data.email, data.score, data.source, data.stage, data.nextAction]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'lead not found' });
+    res.json({ ok: true, lead: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/leads/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query('delete from leads where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'lead not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/customers', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query(
+      `select id, name, health, plan, mrr, status, created_at as "createdAt"
+         from customers
+        where tenant_id = $1
+        order by created_at desc`,
+      [getScopedTenantId(req)]
+    );
+    res.json({ ok: true, customers: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/customers', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const data = normalizeCustomer(req.body);
+    if (!data.name) return res.status(400).json({ ok: false, error: 'customer name is required' });
+    const result = await pool.query(
+      `insert into customers (tenant_id, name, health, plan, mrr, status)
+       values ($1,$2,$3,$4,$5,$6)
+       returning id, name, health, plan, mrr, status, created_at as "createdAt"`,
+      [getScopedTenantId(req), data.name, data.health, data.plan, data.mrr, data.status]
+    );
+    res.status(201).json({ ok: true, customer: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/customers/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const data = normalizeCustomerPatch(req.body);
+    const result = await pool.query(
+      `update customers
+          set name = coalesce($3, name),
+              health = coalesce($4, health),
+              plan = coalesce($5, plan),
+              mrr = coalesce($6, mrr),
+              status = coalesce($7, status)
+        where id = $1 and tenant_id = $2
+        returning id, name, health, plan, mrr, status, created_at as "createdAt"`,
+      [req.params.id, getScopedTenantId(req), data.name, data.health, data.plan, data.mrr, data.status]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'customer not found' });
+    res.json({ ok: true, customer: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/customers/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query('delete from customers where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'customer not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/follow-ups', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query(
+      `select id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"
+         from follow_up_tasks
+        where tenant_id = $1
+        order by coalesce(due_at, created_at) asc`,
+      [getScopedTenantId(req)]
+    );
+    res.json({ ok: true, tasks: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/follow-ups', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const data = normalizeTask(req.body);
+    if (!data.title) return res.status(400).json({ ok: false, error: 'task title is required' });
+    const result = await pool.query(
+      `insert into follow_up_tasks (tenant_id, title, owner_user_id, due_at, priority, channel, status)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       returning id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
+      [getScopedTenantId(req), data.title, req.user.id, data.dueAt, data.priority, data.channel, data.status]
+    );
+    res.status(201).json({ ok: true, task: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const data = normalizeTaskPatch(req.body);
+    const result = await pool.query(
+      `update follow_up_tasks
+          set title = coalesce($3, title),
+              due_at = coalesce($4, due_at),
+              priority = coalesce($5, priority),
+              channel = coalesce($6, channel),
+              status = coalesce($7, status)
+        where id = $1 and tenant_id = $2
+        returning id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
+      [req.params.id, getScopedTenantId(req), data.title, data.dueAt, data.priority, data.channel, data.status]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'follow-up task not found' });
+    res.json({ ok: true, task: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const result = await pool.query('delete from follow_up_tasks where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'follow-up task not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/social/accounts', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
@@ -817,6 +1122,54 @@ async function ensureSchema() {
     alter table app_users add column if not exists updated_at timestamptz not null default now();
     alter table tenants add column if not exists logo_url text;
     alter table app_users add column if not exists avatar_url text;
+    create table if not exists campaigns (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      name text not null,
+      owner_user_id uuid references app_users(id),
+      stage text not null default 'Draft',
+      progress integer not null default 0 check (progress between 0 and 100),
+      budget numeric(12,2) not null default 0,
+      leads_count integer not null default 0,
+      channels text[] not null default '{}',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create table if not exists leads (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      company text not null,
+      contact_name text not null,
+      email text,
+      score integer not null default 0 check (score between 0 and 100),
+      source text,
+      stage text not null default 'New',
+      owner_user_id uuid references app_users(id),
+      next_action text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create table if not exists customers (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      name text not null,
+      health integer not null default 75 check (health between 0 and 100),
+      plan text not null default 'Starter',
+      mrr numeric(12,2) not null default 0,
+      status text not null default 'Active',
+      created_at timestamptz not null default now()
+    );
+    create table if not exists follow_up_tasks (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      title text not null,
+      owner_user_id uuid references app_users(id),
+      due_at timestamptz,
+      priority text not null default 'Medium',
+      channel text not null default 'Email',
+      status text not null default 'Open',
+      created_at timestamptz not null default now()
+    );
     create table if not exists social_accounts (
       id uuid primary key default gen_random_uuid(),
       tenant_id text not null references tenants(id) on delete cascade,
@@ -882,6 +1235,59 @@ async function ensureSchema() {
             updated_at = now()
       where lower(email) in ('karan@example.com', 'mira@example.com', 'dev@example.com')`,
     ['8da7c471aeae6572f0c6d65ac107ea6b:f10adcf9ffa987f02fe0849cc3006c1b91b9a2f18b5b974e09a77d4136a32636a581c6201e652e5190b1c0fd45177e65862f51142cc9c0e75284ff3fbb1911ac']
+  );
+
+  await seedOperationalData(defaultTenantId);
+}
+
+async function seedOperationalData(tenantId) {
+  await pool.query(
+    `insert into campaigns (tenant_id, name, stage, progress, budget, leads_count, channels)
+     select $1, 'Monsoon Wellness Reset', 'Human approval', 72, 180000, 284, array['Instagram','Facebook','Email']
+      where not exists (select 1 from campaigns where tenant_id = $1 and name = 'Monsoon Wellness Reset')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into campaigns (tenant_id, name, stage, progress, budget, leads_count, channels)
+     select $1, 'Corporate Health Webinar', 'AI drafting', 48, 85000, 96, array['LinkedIn','Email']
+      where not exists (select 1 from campaigns where tenant_id = $1 and name = 'Corporate Health Webinar')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into leads (tenant_id, company, contact_name, email, score, source, stage, next_action)
+     select $1, 'Acme Shared Services', 'Priya N.', 'priya@example.com', 92, 'LinkedIn webinar', 'Qualified', 'Call today 16:00'
+      where not exists (select 1 from leads where tenant_id = $1 and company = 'Acme Shared Services')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into leads (tenant_id, company, contact_name, email, score, source, stage, next_action)
+     select $1, 'MetroBuild Group', 'Rohit V.', 'rohit@example.com', 84, 'Facebook lead form', 'Proposal', 'Send pricing deck'
+      where not exists (select 1 from leads where tenant_id = $1 and company = 'MetroBuild Group')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into customers (tenant_id, name, health, plan, mrr, status)
+     select $1, 'Northstar Wellness', 91, 'Growth', 120000, 'Expansion ready'
+      where not exists (select 1 from customers where tenant_id = $1 and name = 'Northstar Wellness')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into customers (tenant_id, name, health, plan, mrr, status)
+     select $1, 'UrbanEdge Realty', 82, 'Scale', 280000, 'Onboarding'
+      where not exists (select 1 from customers where tenant_id = $1 and name = 'UrbanEdge Realty')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into follow_up_tasks (tenant_id, title, due_at, priority, channel, status)
+     select $1, 'Call Acme Shared Services', now() + interval '4 hours', 'High', 'Phone', 'Open'
+      where not exists (select 1 from follow_up_tasks where tenant_id = $1 and title = 'Call Acme Shared Services')`,
+    [tenantId]
+  );
+  await pool.query(
+    `insert into follow_up_tasks (tenant_id, title, due_at, priority, channel, status)
+     select $1, 'Approve webinar nurture email', now() + interval '6 hours', 'High', 'Email', 'Open'
+      where not exists (select 1 from follow_up_tasks where tenant_id = $1 and title = 'Approve webinar nurture email')`,
+    [tenantId]
   );
 }
 
@@ -1117,6 +1523,118 @@ function normalizeAgent(input = {}) {
     tools: Array.isArray(input.tools) ? input.tools : String(input.tools || '').split(',').map((item) => item.trim()).filter(Boolean),
     systemPrompt: cleanString(input.systemPrompt || input.system_prompt) || null
   };
+}
+
+function requireTenantWorkspace(req, res) {
+  if (isPlatformAdmin(req.user)) {
+    res.status(403).json({ ok: false, error: 'Platform admins cannot access tenant workspace operations' });
+    return false;
+  }
+  return true;
+}
+
+function normalizeCampaign(input = {}) {
+  return {
+    name: cleanString(input.name),
+    stage: cleanString(input.stage) || 'Draft',
+    progress: boundedInt(input.progress, 0, 100, 0),
+    budget: boundedNumber(input.budget, 0),
+    leadsCount: boundedInt(input.leadsCount ?? input.leads_count, 0, 1000000, 0),
+    channels: normalizeTextArray(input.channels)
+  };
+}
+
+function normalizeCampaignPatch(input = {}) {
+  return {
+    name: input.name === undefined ? null : cleanString(input.name),
+    stage: input.stage === undefined ? null : cleanString(input.stage),
+    progress: input.progress === undefined ? null : boundedInt(input.progress, 0, 100, 0),
+    budget: input.budget === undefined ? null : boundedNumber(input.budget, 0),
+    leadsCount: input.leadsCount === undefined && input.leads_count === undefined ? null : boundedInt(input.leadsCount ?? input.leads_count, 0, 1000000, 0),
+    channels: input.channels === undefined ? null : normalizeTextArray(input.channels)
+  };
+}
+
+function normalizeLead(input = {}) {
+  return {
+    company: cleanString(input.company),
+    contactName: cleanString(input.contactName || input.contact_name),
+    email: cleanString(input.email) || null,
+    score: boundedInt(input.score, 0, 100, 0),
+    source: cleanString(input.source) || null,
+    stage: cleanString(input.stage) || 'New',
+    nextAction: cleanString(input.nextAction || input.next_action) || null
+  };
+}
+
+function normalizeLeadPatch(input = {}) {
+  return {
+    company: input.company === undefined ? null : cleanString(input.company),
+    contactName: input.contactName === undefined && input.contact_name === undefined ? null : cleanString(input.contactName || input.contact_name),
+    email: input.email === undefined ? null : cleanString(input.email),
+    score: input.score === undefined ? null : boundedInt(input.score, 0, 100, 0),
+    source: input.source === undefined ? null : cleanString(input.source),
+    stage: input.stage === undefined ? null : cleanString(input.stage),
+    nextAction: input.nextAction === undefined && input.next_action === undefined ? null : cleanString(input.nextAction || input.next_action)
+  };
+}
+
+function normalizeCustomer(input = {}) {
+  return {
+    name: cleanString(input.name),
+    health: boundedInt(input.health, 0, 100, 75),
+    plan: cleanString(input.plan) || 'Starter',
+    mrr: boundedNumber(input.mrr, 0),
+    status: cleanString(input.status) || 'Active'
+  };
+}
+
+function normalizeCustomerPatch(input = {}) {
+  return {
+    name: input.name === undefined ? null : cleanString(input.name),
+    health: input.health === undefined ? null : boundedInt(input.health, 0, 100, 75),
+    plan: input.plan === undefined ? null : cleanString(input.plan),
+    mrr: input.mrr === undefined ? null : boundedNumber(input.mrr, 0),
+    status: input.status === undefined ? null : cleanString(input.status)
+  };
+}
+
+function normalizeTask(input = {}) {
+  return {
+    title: cleanString(input.title),
+    dueAt: cleanString(input.dueAt || input.due_at) || null,
+    priority: cleanString(input.priority) || 'Medium',
+    channel: cleanString(input.channel) || 'Email',
+    status: cleanString(input.status) || 'Open'
+  };
+}
+
+function normalizeTaskPatch(input = {}) {
+  return {
+    title: input.title === undefined ? null : cleanString(input.title),
+    dueAt: input.dueAt === undefined && input.due_at === undefined ? null : cleanString(input.dueAt || input.due_at),
+    priority: input.priority === undefined ? null : cleanString(input.priority),
+    channel: input.channel === undefined ? null : cleanString(input.channel),
+    status: input.status === undefined ? null : cleanString(input.status)
+  };
+}
+
+function normalizeTextArray(value) {
+  if (Array.isArray(value)) return value.map(cleanString).filter(Boolean);
+  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function boundedInt(value, min, max, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function boundedNumber(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function getScopedTenantId(req) {

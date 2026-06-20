@@ -179,6 +179,35 @@ update app_users
        updated_at = now()
  where email in ('karan@example.com', 'mira@example.com', 'dev@example.com');
 
+insert into campaigns (tenant_id, name, stage, progress, budget, leads_count, channels)
+values
+  ('northstar', 'Monsoon Wellness Reset', 'Human approval', 72, 180000, 284, array['Instagram','Facebook','Email']),
+  ('northstar', 'Corporate Health Webinar', 'AI drafting', 48, 85000, 96, array['LinkedIn','Email']),
+  ('northstar', 'Referral Boost Week', 'Scheduled', 91, 42000, 138, array['Instagram','Email'])
+on conflict do nothing;
+
+insert into leads (tenant_id, company, contact_name, email, score, source, stage, next_action)
+values
+  ('northstar', 'Acme Shared Services', 'Priya N.', 'priya@example.com', 92, 'LinkedIn webinar', 'Qualified', 'Call today 16:00'),
+  ('northstar', 'MetroBuild Group', 'Rohit V.', 'rohit@example.com', 84, 'Facebook lead form', 'Proposal', 'Send pricing deck'),
+  ('northstar', 'Futura Labs', 'Sara M.', 'sara@example.com', 78, 'Instagram DM', 'New', 'Qualify need')
+on conflict do nothing;
+
+insert into customers (tenant_id, name, health, plan, mrr, status)
+values
+  ('northstar', 'Northstar Wellness', 91, 'Growth', 120000, 'Expansion ready'),
+  ('northstar', 'UrbanEdge Realty', 82, 'Scale', 280000, 'Onboarding'),
+  ('northstar', 'BrightByte Academy', 74, 'Starter', 48000, 'Needs adoption')
+on conflict do nothing;
+
+insert into follow_up_tasks (tenant_id, title, due_at, priority, channel, status)
+values
+  ('northstar', 'Call Acme Shared Services', now() + interval '4 hours', 'High', 'Phone', 'Open'),
+  ('northstar', 'Approve webinar nurture email', now() + interval '6 hours', 'High', 'Email', 'Open'),
+  ('northstar', 'Send MetroBuild deck', now() + interval '1 day', 'Medium', 'Email', 'Open'),
+  ('northstar', 'Qualify Instagram DM leads', now() + interval '2 days', 'Medium', 'Social', 'Open')
+on conflict do nothing;
+
 insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
 values
   ('northstar', 'Campaign Strategist', 'Planning', 'llama3.1:8b', 0.40, 'Every campaign brief', 'Ready', array['Market research','Audience map','Budget split'], 'You are a marketing campaign strategist.'),
