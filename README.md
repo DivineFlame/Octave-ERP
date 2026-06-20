@@ -146,6 +146,7 @@ This repository currently ships:
 - CSV lead import/export and lead-to-customer conversion
 - CRM notes/timeline records for leads, customers, and related entities
 - Scheduled AI job records for recurring workflow planning
+- Background worker container for scheduled AI jobs, retries, locking, run history, and approval draft creation
 - Production observability endpoint for service status, email, audit, approval, and schedule counts
 - Backup/restore helper scripts for PostgreSQL
 - Dokploy-compatible Docker/nginx deployment
@@ -217,6 +218,7 @@ The included API service exposes:
 - `GET /api/scheduled-jobs`
 - `POST /api/scheduled-jobs`
 - `PATCH /api/scheduled-jobs/:id`
+- `GET /api/scheduled-job-runs`
 - `GET /api/follow-ups`
 - `POST /api/follow-ups`
 - `PATCH /api/follow-ups/:id`
@@ -227,6 +229,19 @@ The included API service exposes:
 - `DELETE /api/customers/:id`
 
 PostgreSQL schema and seed data live in `db/init/001_schema.sql`.
+
+## Background Worker
+
+Dokploy compose starts `octave-worker` from the API image:
+
+- polls active scheduled jobs every `WORKER_POLL_MS`
+- locks due jobs with PostgreSQL `FOR UPDATE SKIP LOCKED`
+- runs the configured AI workflow through Paperclip/Ollama
+- creates a human approval draft
+- records run history in `scheduled_job_runs`
+- retries failures up to `WORKER_MAX_RETRIES`, then pauses the job
+
+Supported simple schedules include hourly, daily, weekly, monthly, or manual one-time jobs.
 
 ## Production Maintenance
 

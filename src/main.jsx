@@ -557,6 +557,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
   const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', dueAt: '', priority: 'Medium', channel: 'Email' });
   const [jobs, setJobs] = useState([]);
+  const [jobRuns, setJobRuns] = useState([]);
   const [jobForm, setJobForm] = useState({ name: 'Weekly campaign draft', schedule: 'Every Monday 09:00', nextRunAt: '', jobType: 'ai_workflow' });
   const selectedModel = agentForm.model || models[0]?.name || 'llama3.1:8b';
 
@@ -572,7 +573,10 @@ function AgentAdmin({ tenantId, isAdmin }) {
     if (agentsResult.status === 'fulfilled') setAgents(agentsResult.value.agents || []);
     if (modelsResult.status === 'fulfilled') setModels(modelsResult.value.installed || modelsResult.value.models || []);
     if (paperclipModelsResult.status === 'fulfilled') setPaperclipModels(paperclipModelsResult.value.models || []);
-    if (!isAdmin) api(`/api/scheduled-jobs?tenantId=${tenantId}`).then((result) => setJobs(result.jobs || [])).catch(() => {});
+    if (!isAdmin) {
+      api(`/api/scheduled-jobs?tenantId=${tenantId}`).then((result) => setJobs(result.jobs || [])).catch(() => {});
+      api(`/api/scheduled-job-runs?tenantId=${tenantId}`).then((result) => setJobRuns(result.runs || [])).catch(() => {});
+    }
     setStatus(paperclipResult.status === 'fulfilled' && paperclipResult.value.ok ? 'Paperclip connected' : `Paperclip unavailable: ${paperclipResult.reason?.message || paperclipResult.value?.error || 'check container logs'}`);
   }
 
@@ -682,7 +686,9 @@ function AgentAdmin({ tenantId, isAdmin }) {
         <label>Schedule<input value={jobForm.schedule} onChange={(event) => setJobForm({ ...jobForm, schedule: event.target.value })} /></label>
         <label>Next run<input type="datetime-local" value={jobForm.nextRunAt} onChange={(event) => setJobForm({ ...jobForm, nextRunAt: event.target.value })} /></label>
         <button className="primaryButton" type="submit"><CalendarDays size={16} /> Save schedule</button>
-        <div className="timeline">{jobs.map((job) => <div className="timeItem" key={job.id}><span className="time">{job.status}</span><div><strong>{job.name}</strong><p>{job.schedule} · {formatDue(job.nextRunAt)}</p><div className="miniActions"><button type="button" onClick={() => updateSchedule(job, job.status === 'Paused' ? 'Active' : 'Paused')}>{job.status === 'Paused' ? 'Resume' : 'Pause'}</button><button type="button" onClick={() => updateSchedule(job, 'Archived')}>Archive</button></div></div></div>)}</div>
+        <div className="timeline">{jobs.map((job) => <div className="timeItem" key={job.id}><span className="time">{job.status}</span><div><strong>{job.name}</strong><p>{job.schedule} · {formatDue(job.nextRunAt)}{job.retryCount ? ` · ${job.retryCount} retries` : ''}</p>{job.lastError && <small>{job.lastError}</small>}<div className="miniActions"><button type="button" onClick={() => updateSchedule(job, job.status === 'Paused' ? 'Active' : 'Paused')}>{job.status === 'Paused' ? 'Resume' : 'Pause'}</button><button type="button" onClick={() => updateSchedule(job, 'Archived')}>Archive</button></div></div></div>)}</div>
+        <h3>Recent Runs</h3>
+        <div className="timeline">{jobRuns.slice(0, 5).map((run) => <div className="timeItem" key={run.id}><span className="time">{run.status}</span><div><strong>{run.jobName || 'Scheduled job'}</strong><p>{formatDue(run.startedAt)}{run.approvalId ? ` · approval ${run.approvalId.slice(0, 8)}` : ''}</p>{run.error && <small>{run.error}</small>}</div></div>)}</div>
       </form>}
       <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
     </div>

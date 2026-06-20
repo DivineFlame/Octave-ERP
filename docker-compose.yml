@@ -37,6 +37,28 @@ services:
       ollama:
         condition: service_started
 
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: octave-worker
+    restart: unless-stopped
+    command: ["npm", "run", "worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-octave}:${POSTGRES_PASSWORD:-octave_password}@postgres:5432/${POSTGRES_DB:-octave_crm}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      PAPERCLIP_BASE_URL: ${PAPERCLIP_BASE_URL:-http://paperclip}
+      WORKER_POLL_MS: ${WORKER_POLL_MS:-15000}
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-3}
+      WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      paperclip:
+        condition: service_started
+
   paperclip:
     build:
       context: ./paperclip

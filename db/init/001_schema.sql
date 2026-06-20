@@ -198,9 +198,30 @@ create table if not exists scheduled_jobs (
   status text not null default 'Active',
   next_run_at timestamptz,
   last_run_at timestamptz,
+  locked_at timestamptz,
+  locked_by text,
+  retry_count integer not null default 0,
+  last_error text,
   created_by uuid references app_users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+alter table scheduled_jobs add column if not exists locked_at timestamptz;
+alter table scheduled_jobs add column if not exists locked_by text;
+alter table scheduled_jobs add column if not exists retry_count integer not null default 0;
+alter table scheduled_jobs add column if not exists last_error text;
+
+create table if not exists scheduled_job_runs (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid references scheduled_jobs(id) on delete cascade,
+  tenant_id text not null references tenants(id) on delete cascade,
+  status text not null,
+  approval_id uuid references approvals(id) on delete set null,
+  output text,
+  error text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz
 );
 
 insert into tenants (id, name, plan, status)

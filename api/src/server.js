@@ -1097,13 +1097,35 @@ app.get('/api/scheduled-jobs', requireAuth, async (req, res, next) => {
     const tenantId = getScopedTenantId(req);
     const result = await pool.query(
       `select id, name, job_type as "jobType", schedule, payload, status,
-              next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"
+              next_run_at as "nextRunAt", last_run_at as "lastRunAt",
+              retry_count as "retryCount", last_error as "lastError", created_at as "createdAt"
          from scheduled_jobs
         where tenant_id = $1
         order by next_run_at nulls last, created_at desc`,
       [tenantId]
     );
     res.json({ ok: true, jobs: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/scheduled-job-runs', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select r.id, r.job_id as "jobId", j.name as "jobName", r.status,
+              r.approval_id as "approvalId", r.output, r.error,
+              r.started_at as "startedAt", r.finished_at as "finishedAt"
+         from scheduled_job_runs r
+         left join scheduled_jobs j on j.id = r.job_id
+        where r.tenant_id = $1
+        order by r.started_at desc
+        limit 50`,
+      [tenantId]
+    );
+    res.json({ ok: true, runs: result.rows });
   } catch (error) {
     next(error);
   }
@@ -1123,7 +1145,8 @@ app.post('/api/scheduled-jobs', requireAuth, async (req, res, next) => {
       `insert into scheduled_jobs (tenant_id, name, job_type, schedule, payload, status, next_run_at, created_by)
        values ($1,$2,$3,$4,$5::jsonb,'Active',$6,$7)
        returning id, name, job_type as "jobType", schedule, payload, status,
-                 next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"`,
+                 next_run_at as "nextRunAt", last_run_at as "lastRunAt",
+                 retry_count as "retryCount", last_error as "lastError", created_at as "createdAt"`,
       [tenantId, name, jobType, schedule, JSON.stringify(payload), nextRunAt, req.user.id]
     );
     await logAudit({ tenantId, actorUserId: req.user.id, action: 'schedule.create', entityType: 'scheduled_job', entityId: result.rows[0].id, details: { name, jobType, schedule } });
@@ -1146,7 +1169,8 @@ app.patch('/api/scheduled-jobs/:id', requireAuth, async (req, res, next) => {
               updated_at = now()
         where id = $1 and tenant_id = $2
         returning id, name, job_type as "jobType", schedule, payload, status,
-                  next_run_at as "nextRunAt", last_run_at as "lastRunAt", created_at as "createdAt"`,
+                  next_run_at as "nextRunAt", last_run_at as "lastRunAt",
+                  retry_count as "retryCount", last_error as "lastError", created_at as "createdAt"`,
       [req.params.id, tenantId, status || null, cleanString(req.body?.nextRunAt) || null]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'scheduled job not found' });
@@ -1763,9 +1787,28 @@ async function ensureSchema() {
       status text not null default 'Active',
       next_run_at timestamptz,
       last_run_at timestamptz,
+      locked_at timestamptz,
+      locked_by text,
+      retry_count integer not null default 0,
+      last_error text,
       created_by uuid references app_users(id) on delete set null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
+    );
+    alter table scheduled_jobs add column if not exists locked_at timestamptz;
+    alter table scheduled_jobs add column if not exists locked_by text;
+    alter table scheduled_jobs add column if not exists retry_count integer not null default 0;
+    alter table scheduled_jobs add column if not exists last_error text;
+    create table if not exists scheduled_job_runs (
+      id uuid primary key default gen_random_uuid(),
+      job_id uuid references scheduled_jobs(id) on delete cascade,
+      tenant_id text not null references tenants(id) on delete cascade,
+      status text not null,
+      approval_id uuid references approvals(id) on delete set null,
+      output text,
+      error text,
+      started_at timestamptz not null default now(),
+      finished_at timestamptz
     );
   `);
 
