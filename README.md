@@ -137,6 +137,8 @@ This repository currently ships:
 - Tenant-scoped CRUD APIs for campaigns, leads, follow-up tasks, and customers
 - Native AI workflow drafts for campaigns, follow-up emails, and follow-up tasks
 - Approval execution that creates campaigns/tasks or sends SMTP email only after human approval
+- Mandatory password change for newly created/reset users
+- Password reset tokens, audit logs, and email delivery logs
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -149,6 +151,8 @@ The included API service exposes:
 - `POST /api/auth/login`
 - `GET /api/auth/me`
 - `POST /api/auth/change-password`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
 - `GET /api/tenants`
 - `POST /api/admin/tenants`
 - `PATCH /api/admin/tenants/:id`
@@ -156,6 +160,8 @@ The included API service exposes:
 - `GET /api/admin/users`
 - `POST /api/admin/users`
 - `POST /api/admin/users/:id/password`
+- `GET /api/admin/audit-logs`
+- `GET /api/admin/email-logs`
 - `GET /api/email/config`
 - `PUT /api/email/config`
 - `POST /api/email/test`

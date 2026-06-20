@@ -3,7 +3,7 @@ import cors from 'cors';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import pg from 'pg';
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 
 const { Pool } = pg;
 
@@ -51,7 +51,8 @@ app.post('/api/auth/login', async (req, res, next) => {
 
     const result = await pool.query(
       `select u.id, u.tenant_id, u.name, u.email, u.password_hash, u.role, u.platform_role,
-              u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+              u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
+              t.name as tenant_name, t.plan,
               t.status as tenant_status, t.logo_url as tenant_logo_url
          from app_users u
          join tenants t on t.id = u.tenant_id
@@ -68,6 +69,7 @@ app.post('/api/auth/login', async (req, res, next) => {
 
     const safeUser = toSafeUser(user);
     const token = signToken({ sub: safeUser.id, tenantId: safeUser.tenantId, role: safeUser.platformRole });
+    await logAudit({ tenantId: safeUser.tenantId, actorUserId: safeUser.id, action: 'auth.login', entityType: 'user', entityId: safeUser.id, details: { email: safeUser.email } });
     res.json({ ok: true, token, user: safeUser });
   } catch (error) {
     next(error);
@@ -89,7 +91,62 @@ app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
     if (!result.rowCount || !verifyPassword(currentPassword, result.rows[0].password_hash)) {
       return res.status(401).json({ ok: false, error: 'Current password is incorrect' });
     }
-    await pool.query('update app_users set password_hash = $2, updated_at = now() where id = $1', [req.user.id, hashPassword(newPassword)]);
+    await pool.query('update app_users set password_hash = $2, must_change_password = false, updated_at = now() where id = $1', [req.user.id, hashPassword(newPassword)]);
+    await logAudit({ tenantId: req.user.tenantId, actorUserId: req.user.id, action: 'auth.change_password', entityType: 'user', entityId: req.user.id });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res, next) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ ok: false, error: 'email is required' });
+  try {
+    const result = await pool.query(
+      `select u.id, u.tenant_id, u.name, u.email, t.name as tenant_name
+         from app_users u
+         join tenants t on t.id = u.tenant_id
+        where lower(u.email) = $1 and u.is_active = true`,
+      [email]
+    );
+    let delivery = { sent: false, skipped: true, reason: 'If the account exists, reset instructions will be sent.' };
+    if (result.rowCount) {
+      const user = result.rows[0];
+      const token = randomBytes(32).toString('base64url');
+      await pool.query(
+        `insert into password_reset_tokens (user_id, token_hash, expires_at)
+         values ($1,$2,now() + interval '1 hour')`,
+        [user.id, hashToken(token)]
+      );
+      delivery = await sendPasswordResetEmail({ tenantId: user.tenant_id, to: user.email, name: user.name, tenantName: user.tenant_name, token });
+      await logAudit({ tenantId: user.tenant_id, actorUserId: user.id, action: 'auth.password_reset_requested', entityType: 'user', entityId: user.id, details: { email: user.email, delivery } });
+    }
+    res.json({ ok: true, delivery: maskDelivery(delivery) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res, next) => {
+  const token = String(req.body?.token || '');
+  const newPassword = String(req.body?.newPassword || '');
+  if (!token || !newPassword) return res.status(400).json({ ok: false, error: 'token and newPassword are required' });
+  if (newPassword.length < 8) return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters' });
+  try {
+    const tokenHash = hashToken(token);
+    const result = await pool.query(
+      `select prt.id, prt.user_id, u.tenant_id
+         from password_reset_tokens prt
+         join app_users u on u.id = prt.user_id
+        where prt.token_hash = $1 and prt.used_at is null and prt.expires_at > now()`,
+      [tokenHash]
+    );
+    if (!result.rowCount) return res.status(400).json({ ok: false, error: 'Password reset link is invalid or expired' });
+    const row = result.rows[0];
+    await pool.query('update app_users set password_hash = $2, must_change_password = false, updated_at = now() where id = $1', [row.user_id, hashPassword(newPassword)]);
+    await pool.query('update password_reset_tokens set used_at = now() where id = $1', [row.id]);
+    await logAudit({ tenantId: row.tenant_id, actorUserId: row.user_id, action: 'auth.password_reset_completed', entityType: 'user', entityId: row.user_id });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -231,7 +288,8 @@ app.get('/api/admin/users', requireAuth, async (req, res, next) => {
     const tenantId = getScopedTenantId(req);
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-              team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"
+              team, initials, avatar_url as "avatarUrl", is_active as "isActive",
+              must_change_password as "mustChangePassword", created_at as "createdAt"
          from app_users
         where tenant_id = $1
         order by created_at desc`,
@@ -282,7 +340,8 @@ app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) =>
   try {
     const userResult = await pool.query(
       `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-              team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"
+              team, initials, avatar_url as "avatarUrl", is_active as "isActive",
+              must_change_password as "mustChangePassword", created_at as "createdAt"
          from app_users
         where id = $1`,
       [req.params.id]
@@ -295,8 +354,19 @@ app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) =>
     if (target.platformRole === 'platform_admin' && !isPlatformAdmin(req.user)) {
       return res.status(403).json({ ok: false, error: 'Platform admin password can only be changed by that admin' });
     }
-    await pool.query('update app_users set password_hash = $2, updated_at = now() where id = $1', [target.id, hashPassword(newPassword)]);
-    res.json({ ok: true, user: target });
+    await pool.query('update app_users set password_hash = $2, must_change_password = true, updated_at = now() where id = $1', [target.id, hashPassword(newPassword)]);
+    const tenantResult = await pool.query('select id, name, plan, status, logo_url as "logoUrl" from tenants where id = $1', [target.tenantId]);
+    const emailDelivery = await sendCredentialEmail({
+      tenantId: isPlatformAdmin(req.user) ? null : target.tenantId,
+      to: target.email,
+      name: target.name,
+      email: target.email,
+      password: newPassword,
+      createdBy: req.user,
+      tenant: tenantResult.rows[0]
+    });
+    await logAudit({ tenantId: target.tenantId, actorUserId: req.user.id, action: 'admin.reset_user_password', entityType: 'user', entityId: target.id, details: { email: target.email, delivery: emailDelivery } });
+    res.json({ ok: true, user: { ...target, mustChangePassword: true }, emailDelivery });
   } catch (error) {
     next(error);
   }
@@ -362,6 +432,45 @@ app.post('/api/email/test', requireAuth, async (req, res, next) => {
       html: '<p>Your Octave CRM email configuration is working.</p>'
     });
     res.status(delivery.sent ? 200 : 400).json({ ok: delivery.sent, delivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/admin/audit-logs', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getScopedTenantId(req);
+    if (!canManageTenantUsers(req.user, tenantId)) return res.status(403).json({ ok: false, error: 'Admin access required' });
+    const result = await pool.query(
+      `select al.id, al.action, al.entity_type as "entityType", al.entity_id as "entityId",
+              al.details, al.created_at as "createdAt", u.email as actor
+         from audit_logs al
+         left join app_users u on u.id = al.actor_user_id
+        where al.tenant_id = $1 or $2 = true
+        order by al.created_at desc
+        limit 100`,
+      [tenantId, isPlatformAdmin(req.user)]
+    );
+    res.json({ ok: true, logs: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/admin/email-logs', requireAuth, async (req, res, next) => {
+  try {
+    const tenantId = getScopedTenantId(req);
+    if (!canManageTenantUsers(req.user, tenantId)) return res.status(403).json({ ok: false, error: 'Admin access required' });
+    const result = await pool.query(
+      `select id, tenant_id as "tenantId", recipient, subject, status,
+              provider_message_id as "providerMessageId", error, created_at as "createdAt"
+         from email_delivery_logs
+        where tenant_id = $1 or $2 = true
+        order by created_at desc
+        limit 100`,
+      [tenantId, isPlatformAdmin(req.user)]
+    );
+    res.json({ ok: true, logs: result.rows });
   } catch (error) {
     next(error);
   }
@@ -1103,7 +1212,8 @@ async function requireAuth(req, res, next) {
     if (!payload) return res.status(401).json({ ok: false, error: 'Authentication required' });
     const result = await pool.query(
       `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
-              u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+              u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
+              t.name as tenant_name, t.plan,
               t.status as tenant_status, t.logo_url as tenant_logo_url
          from app_users u
          join tenants t on t.id = u.tenant_id
@@ -1161,6 +1271,7 @@ async function ensureSchema() {
     alter table app_users add column if not exists password_hash text;
     alter table app_users add column if not exists platform_role text not null default 'tenant_user';
     alter table app_users add column if not exists is_active boolean not null default true;
+    alter table app_users add column if not exists must_change_password boolean not null default false;
     alter table app_users add column if not exists updated_at timestamptz not null default now();
     alter table tenants add column if not exists logo_url text;
     alter table app_users add column if not exists avatar_url text;
@@ -1268,6 +1379,34 @@ async function ensureSchema() {
       updated_by uuid references app_users(id) on delete set null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
+    );
+    create table if not exists password_reset_tokens (
+      id uuid primary key default gen_random_uuid(),
+      user_id uuid not null references app_users(id) on delete cascade,
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      used_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+    create table if not exists audit_logs (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text references tenants(id) on delete set null,
+      actor_user_id uuid references app_users(id) on delete set null,
+      action text not null,
+      entity_type text,
+      entity_id text,
+      details jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+    create table if not exists email_delivery_logs (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text references tenants(id) on delete set null,
+      recipient text not null,
+      subject text not null,
+      status text not null,
+      provider_message_id text,
+      error text,
+      created_at timestamptz not null default now()
     );
   `);
 
@@ -1602,10 +1741,11 @@ async function executeApprovalAction({ tenantId, actionType, actionPayload }) {
 async function createUser(client, { tenantId, name, email, password, role, platformRole, team, avatarUrl }) {
   if (!tenantId || !name || !email || !password) throw new Error('tenantId, name, email, and password are required');
   const result = await client.query(
-    `insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials, avatar_url)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials, avatar_url, must_change_password)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
      returning id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
-               team, initials, avatar_url as "avatarUrl", is_active as "isActive", created_at as "createdAt"`,
+               team, initials, avatar_url as "avatarUrl", is_active as "isActive",
+               must_change_password as "mustChangePassword", created_at as "createdAt"`,
     [tenantId, name, email, hashPassword(password), role, platformRole, team || null, initialsFor(name), avatarUrl || null]
   );
   return result.rows[0];
@@ -1614,7 +1754,8 @@ async function createUser(client, { tenantId, name, email, password, role, platf
 async function loadUserById(id) {
   const result = await pool.query(
     `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
-            u.team, u.initials, u.avatar_url, u.is_active, t.name as tenant_name, t.plan,
+            u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
+            t.name as tenant_name, t.plan,
             t.status as tenant_status, t.logo_url as tenant_logo_url
        from app_users u
        join tenants t on t.id = u.tenant_id
@@ -1701,10 +1842,28 @@ async function sendCredentialEmail({ tenantId, to, name, email, password, create
   return sendMailWithConfig({ tenantId, to, subject, text, html });
 }
 
+async function sendPasswordResetEmail({ tenantId, to, name, tenantName, token }) {
+  const loginUrl = process.env.PUBLIC_APP_URL || 'http://38.247.188.228:3002';
+  const resetUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}resetToken=${encodeURIComponent(token)}`;
+  const subject = `Reset your Octave CRM password`;
+  const text = [
+    `Hello ${name || ''},`,
+    '',
+    `Use this link to reset your Octave CRM password for ${tenantName || 'your company'}:`,
+    resetUrl,
+    '',
+    'This link expires in 1 hour.'
+  ].join('\n');
+  const html = `<p>Hello ${escapeHtml(name || '')},</p><p>Use this link to reset your Octave CRM password for ${escapeHtml(tenantName || 'your company')}:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`;
+  return sendMailWithConfig({ tenantId, to, subject, text, html });
+}
+
 async function sendMailWithConfig({ tenantId, to, subject, text, html }) {
   const config = await getBestEmailConfig(tenantId);
   if (!config?.enabled || !config.smtpHost || !config.fromEmail) {
-    return { sent: false, skipped: true, reason: 'email configuration is not enabled' };
+    const skipped = { sent: false, skipped: true, reason: 'email configuration is not enabled' };
+    await logEmailDelivery({ tenantId, to, subject, result: skipped });
+    return skipped;
   }
   try {
     const transporter = nodemailer.createTransport({
@@ -1720,10 +1879,52 @@ async function sendMailWithConfig({ tenantId, to, subject, text, html }) {
       text,
       html
     });
-    return { sent: true, messageId: info.messageId };
+    const sent = { sent: true, messageId: info.messageId };
+    await logEmailDelivery({ tenantId, to, subject, result: sent });
+    return sent;
   } catch (error) {
-    return { sent: false, error: error.message };
+    const failed = { sent: false, error: error.message };
+    await logEmailDelivery({ tenantId, to, subject, result: failed });
+    return failed;
   }
+}
+
+async function logEmailDelivery({ tenantId, to, subject, result }) {
+  try {
+    await pool.query(
+      `insert into email_delivery_logs (tenant_id, recipient, subject, status, provider_message_id, error)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [tenantId || null, to, subject, result.sent ? 'sent' : result.skipped ? 'skipped' : 'failed', result.messageId || null, result.error || result.reason || null]
+    );
+  } catch (error) {
+    console.warn('Failed to log email delivery', error.message);
+  }
+}
+
+async function logAudit({ tenantId, actorUserId, action, entityType, entityId, details = {} }) {
+  try {
+    await pool.query(
+      `insert into audit_logs (tenant_id, actor_user_id, action, entity_type, entity_id, details)
+       values ($1,$2,$3,$4,$5,$6::jsonb)`,
+      [tenantId || null, actorUserId || null, action, entityType || null, entityId ? String(entityId) : null, JSON.stringify(details || {})]
+    );
+  } catch (error) {
+    console.warn('Failed to write audit log', error.message);
+  }
+}
+
+function hashToken(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function maskDelivery(delivery) {
+  if (!delivery) return null;
+  return {
+    sent: Boolean(delivery.sent),
+    skipped: Boolean(delivery.skipped),
+    reason: delivery.reason,
+    error: delivery.error
+  };
 }
 
 function normalizeAgent(input = {}) {
@@ -1882,6 +2083,7 @@ function toSafeUser(row) {
     team: row.team,
     initials: row.initials || initialsFor(row.name),
     avatarUrl: row.avatar_url,
+    mustChangePassword: Boolean(row.must_change_password),
     tenant: {
       id: row.tenant_id,
       name: row.tenant_name,

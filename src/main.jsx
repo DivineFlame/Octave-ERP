@@ -57,13 +57,19 @@ function App() {
 
   if (booting) return <div className="bootScreen">Loading Octave CRM...</div>;
   if (!session) return <LoginPage onLogin={setSession} />;
+  if (session.user.mustChangePassword) return <ForcePasswordChange session={session} onComplete={(user) => setSession({ ...session, user })} onLogout={() => { localStorage.removeItem(TOKEN_KEY); setSession(null); }} />;
   return <Workspace session={session} onLogout={() => { localStorage.removeItem(TOKEN_KEY); setSession(null); }} />;
 }
 
 function LoginPage({ onLogin }) {
+  const resetToken = new URLSearchParams(window.location.search).get('resetToken') || '';
   const [email, setEmail] = useState('admin@octave.local');
   const [password, setPassword] = useState('Admin@12345');
+  const [resetEmail, setResetEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [mode, setMode] = useState(resetToken ? 'reset' : 'login');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   async function submit(event) {
     event.preventDefault();
@@ -77,18 +83,88 @@ function LoginPage({ onLogin }) {
     }
   }
 
+  async function requestReset(event) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    try {
+      const result = await api('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: resetEmail }) });
+      setMessage(result.delivery?.sent ? 'Reset email sent.' : 'If the account exists, reset instructions will be sent when email is configured.');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    try {
+      await api('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: resetToken, newPassword }) });
+      window.history.replaceState({}, '', window.location.pathname);
+      setMode('login');
+      setMessage('Password reset complete. Sign in with your new password.');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <main className="loginShell">
-      <form className="loginCard" onSubmit={submit}>
+      {mode === 'login' && <form className="loginCard" onSubmit={submit}>
         <div className="brand loginBrand"><div className="brandMark">O</div><div><strong>Octave CRM</strong><span>Multi-tenant AI marketing suite</span></div></div>
         <h1>Sign in</h1>
         <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
         <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         {error && <div className="errorBox">{error}</div>}
+        {message && <div className="credentialBox"><strong>{message}</strong></div>}
         <button className="primaryButton" type="submit"><KeyRound size={16} /> Login</button>
-      </form>
+        <button className="linkButton" type="button" onClick={() => { setMode('forgot'); setError(''); setMessage(''); }}>Forgot password?</button>
+      </form>}
+      {mode === 'forgot' && <form className="loginCard" onSubmit={requestReset}>
+        <div className="brand loginBrand"><div className="brandMark">O</div><div><strong>Octave CRM</strong><span>Password recovery</span></div></div>
+        <h1>Reset password</h1>
+        <label>Email<input value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required /></label>
+        {error && <div className="errorBox">{error}</div>}
+        {message && <div className="credentialBox"><strong>{message}</strong></div>}
+        <button className="primaryButton" type="submit"><Mail size={16} /> Send reset link</button>
+        <button className="linkButton" type="button" onClick={() => { setMode('login'); setError(''); setMessage(''); }}>Back to login</button>
+      </form>}
+      {mode === 'reset' && <form className="loginCard" onSubmit={resetPassword}>
+        <div className="brand loginBrand"><div className="brandMark">O</div><div><strong>Octave CRM</strong><span>Choose a new password</span></div></div>
+        <h1>New password</h1>
+        <label>Password<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label>
+        {error && <div className="errorBox">{error}</div>}
+        {message && <div className="credentialBox"><strong>{message}</strong></div>}
+        <button className="primaryButton" type="submit"><KeyRound size={16} /> Reset password</button>
+      </form>}
     </main>
   );
+}
+
+function ForcePasswordChange({ session, onComplete, onLogout }) {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
+  const [error, setError] = useState('');
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    try {
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify(form) });
+      const result = await api('/api/auth/me');
+      onComplete(result.user);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+  return <main className="loginShell"><form className="loginCard" onSubmit={submit}>
+    <div className="brand loginBrand"><div className="brandMark">O</div><div><strong>Octave CRM</strong><span>{session.user.email}</span></div></div>
+    <h1>Change password</h1>
+    <label>Temporary password<input type="password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} required /></label>
+    <label>New password<input type="password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} required /></label>
+    {error && <div className="errorBox">{error}</div>}
+    <button className="primaryButton" type="submit"><KeyRound size={16} /> Continue</button>
+    <button className="linkButton" type="button" onClick={onLogout}>Logout</button>
+  </form></main>;
 }
 
 function Workspace({ session, onLogout }) {
@@ -298,10 +374,21 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           {isPlatformAdmin && <article className="agentCard companyList"><h3>Companies</h3>{tenants.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.plan} · {item.status}</p></div><div className="miniActions"><button onClick={() => setTenantStatus(item.id, item.status === 'Restricted' ? 'Active' : 'Restricted')}>{item.status === 'Restricted' ? 'Activate' : 'Restrict'}</button><button className="dangerButton" onClick={() => deleteTenant(item.id)}><Trash2 size={14} /></button></div></div>)}</article>}
           <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email}</p></div><span className="badge">{item.role}</span></div>)}</article>
           <article className="agentCard companyList"><h3>Agent Social Access</h3>{socialAccounts.length ? socialAccounts.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.platform}</strong><p>{item.handle} · {item.credentialKeys?.length || 0} credential keys</p></div><div className="miniActions"><span className="badge">{item.status}</span><button className="dangerButton" onClick={() => deleteSocialAccount(item.id)}><Trash2 size={14} /></button></div></div>) : <p>No social handles configured yet.</p>}</article>
+          <ActivityPanel tenantId={tenantId} />
         </div>
       </div>
     </Panel>
   </section>;
+}
+
+function ActivityPanel({ tenantId }) {
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [emailLogs, setEmailLogs] = useState([]);
+  useEffect(() => {
+    api(`/api/admin/audit-logs?tenantId=${tenantId}`).then((result) => setAuditLogs(result.logs || [])).catch(() => {});
+    api(`/api/admin/email-logs?tenantId=${tenantId}`).then((result) => setEmailLogs(result.logs || [])).catch(() => {});
+  }, [tenantId]);
+  return <article className="agentCard companyList"><h3>Activity & Email Logs</h3><div className="activityGrid"><div>{auditLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.action}</strong><p>{item.actor || 'System'} · {formatDue(item.createdAt)}</p></div>)}</div><div>{emailLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.status}: {item.recipient}</strong><p>{item.subject}</p></div>)}</div></div></article>;
 }
 
 function Overview({ tenantId }) {

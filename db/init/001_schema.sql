@@ -21,6 +21,7 @@ create table if not exists app_users (
   initials text,
   avatar_url text,
   is_active boolean not null default true,
+  must_change_password boolean not null default false,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -28,6 +29,7 @@ create table if not exists app_users (
 alter table app_users add column if not exists password_hash text;
 alter table app_users add column if not exists platform_role text not null default 'tenant_user';
 alter table app_users add column if not exists is_active boolean not null default true;
+alter table app_users add column if not exists must_change_password boolean not null default false;
 alter table app_users add column if not exists updated_at timestamptz not null default now();
 alter table tenants add column if not exists logo_url text;
 alter table app_users add column if not exists avatar_url text;
@@ -143,6 +145,37 @@ create table if not exists email_configs (
   updated_by uuid references app_users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists password_reset_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text references tenants(id) on delete set null,
+  actor_user_id uuid references app_users(id) on delete set null,
+  action text not null,
+  entity_type text,
+  entity_id text,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists email_delivery_logs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text references tenants(id) on delete set null,
+  recipient text not null,
+  subject text not null,
+  status text not null,
+  provider_message_id text,
+  error text,
+  created_at timestamptz not null default now()
 );
 
 insert into tenants (id, name, plan, status)
