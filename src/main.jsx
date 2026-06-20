@@ -306,6 +306,21 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     setMessage(`Password updated for ${result.user.email}`);
   }
 
+  async function toggleUserAccess(user) {
+    setMessage('');
+    const result = await api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ tenantId, isActive: !user.isActive }) });
+    setUsers((current) => current.map((item) => item.id === user.id ? result.user : item));
+    setMessage(`${result.user.email} is now ${result.user.isActive ? 'active' : 'inactive'}`);
+  }
+
+  async function deleteUser(user) {
+    if (!window.confirm(`Delete ${user.name || user.email}?`)) return;
+    setMessage('');
+    await api(`/api/admin/users/${user.id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
+    setUsers((current) => current.filter((item) => item.id !== user.id));
+    setMessage(`${user.email} was deleted`);
+  }
+
   async function saveSocialAccount(event) {
     event.preventDefault();
     setMessage('');
@@ -372,7 +387,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
         </form>
         <div className="agentCards adminList">
           {isPlatformAdmin && <article className="agentCard companyList"><h3>Companies</h3>{tenants.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.plan} · {item.status}</p></div><div className="miniActions"><button onClick={() => setTenantStatus(item.id, item.status === 'Restricted' ? 'Active' : 'Restricted')}>{item.status === 'Restricted' ? 'Activate' : 'Restrict'}</button><button className="dangerButton" onClick={() => deleteTenant(item.id)}><Trash2 size={14} /></button></div></div>)}</article>}
-          <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email}</p></div><span className="badge">{item.role}</span></div>)}</article>
+          <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email} · {item.role}</p></div><div className="miniActions"><span className={item.isActive ? 'badge' : 'badge danger'}>{item.isActive ? 'Active' : 'Inactive'}</span><button onClick={() => toggleUserAccess(item)}>{item.isActive ? 'Disable' : 'Enable'}</button>{item.platformRole !== 'platform_admin' && <button className="dangerButton" onClick={() => deleteUser(item)}><Trash2 size={14} /></button>}</div></div>)}</article>
           <article className="agentCard companyList"><h3>Agent Social Access</h3>{socialAccounts.length ? socialAccounts.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.platform}</strong><p>{item.handle} · {item.credentialKeys?.length || 0} credential keys</p></div><div className="miniActions"><span className="badge">{item.status}</span><button className="dangerButton" onClick={() => deleteSocialAccount(item.id)}><Trash2 size={14} /></button></div></div>) : <p>No social handles configured yet.</p>}</article>
           <ActivityPanel tenantId={tenantId} />
         </div>

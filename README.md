@@ -139,6 +139,8 @@ This repository currently ships:
 - Approval execution that creates campaigns/tasks or sends SMTP email only after human approval
 - Mandatory password change for newly created/reset users
 - Password reset tokens, audit logs, and email delivery logs
+- Admin/tenant-admin user activation, deactivation, and deletion controls
+- Audit trail coverage for tenant, user, campaign, lead, customer, follow-up, social account, AI workflow, and approval actions
 - Dokploy-compatible Docker/nginx deployment
 
 Channel-specific publishing integrations should be attached next.
@@ -159,6 +161,8 @@ The included API service exposes:
 - `DELETE /api/admin/tenants/:id`
 - `GET /api/admin/users`
 - `POST /api/admin/users`
+- `PATCH /api/admin/users/:id`
+- `DELETE /api/admin/users/:id`
 - `POST /api/admin/users/:id/password`
 - `GET /api/admin/audit-logs`
 - `GET /api/admin/email-logs`

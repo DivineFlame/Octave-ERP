@@ -233,6 +233,7 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
       createdBy: req.user,
       tenant: tenant.rows[0]
     }) : { sent: false, skipped: true, reason: 'tenant admin credentials not provided' };
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_tenant', entityType: 'tenant', entityId: tenantId, details: { name, plan, status, adminEmail } });
     res.status(201).json({ ok: true, tenant: tenant.rows[0], user, emailDelivery });
   } catch (error) {
     await client.query('rollback');
@@ -263,6 +264,7 @@ app.patch('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next)
       [req.params.id, name || null, plan || null, status || null, logoUrl || null]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
+    await logAudit({ tenantId: req.params.id, actorUserId: req.user.id, action: 'admin.update_tenant', entityType: 'tenant', entityId: req.params.id, details: { name, plan, status, logoUrl } });
     res.json({ ok: true, tenant: result.rows[0] });
   } catch (error) {
     next(error);
@@ -277,6 +279,7 @@ app.delete('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next
   try {
     const result = await pool.query('delete from tenants where id = $1 returning id, name', [req.params.id]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
+    await logAudit({ tenantId: null, actorUserId: req.user.id, action: 'admin.delete_tenant', entityType: 'tenant', entityId: result.rows[0].id, details: { name: result.rows[0].name } });
     res.json({ ok: true, tenant: result.rows[0] });
   } catch (error) {
     next(error);
@@ -327,7 +330,69 @@ app.post('/api/admin/users', requireAuth, async (req, res, next) => {
       createdBy: req.user,
       tenant: tenantResult.rows[0]
     });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_user', entityType: 'user', entityId: user.id, details: { email: user.email, role: user.role, delivery: emailDelivery } });
     res.status(201).json({ ok: true, user, emailDelivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/admin/users/:id', requireAuth, async (req, res, next) => {
+  try {
+    const userResult = await pool.query(
+      `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
+              team, initials, avatar_url as "avatarUrl", is_active as "isActive",
+              must_change_password as "mustChangePassword", created_at as "createdAt"
+         from app_users
+        where id = $1`,
+      [req.params.id]
+    );
+    if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
+    const target = userResult.rows[0];
+    if (!canManageTenantUsers(req.user, target.tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can update this user' });
+    }
+    if (target.platformRole === 'platform_admin' && target.id !== req.user.id) {
+      return res.status(403).json({ ok: false, error: 'Platform admin users cannot be updated here' });
+    }
+
+    const nextActive = req.body?.isActive === undefined ? target.isActive : Boolean(req.body.isActive);
+    const result = await pool.query(
+      `update app_users
+          set is_active = $2,
+              updated_at = now()
+        where id = $1
+        returning id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
+                  team, initials, avatar_url as "avatarUrl", is_active as "isActive",
+                  must_change_password as "mustChangePassword", created_at as "createdAt"`,
+      [target.id, nextActive]
+    );
+    await logAudit({ tenantId: target.tenantId, actorUserId: req.user.id, action: nextActive ? 'admin.activate_user' : 'admin.deactivate_user', entityType: 'user', entityId: target.id, details: { email: target.email } });
+    res.json({ ok: true, user: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAuth, async (req, res, next) => {
+  try {
+    const userResult = await pool.query(
+      `select id, tenant_id as "tenantId", email, platform_role as "platformRole"
+         from app_users
+        where id = $1`,
+      [req.params.id]
+    );
+    if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
+    const target = userResult.rows[0];
+    if (!canManageTenantUsers(req.user, target.tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can delete this user' });
+    }
+    if (target.id === req.user.id || target.platformRole === 'platform_admin') {
+      return res.status(400).json({ ok: false, error: 'This user cannot be deleted from tenant administration' });
+    }
+    await pool.query('delete from app_users where id = $1', [target.id]);
+    await logAudit({ tenantId: target.tenantId, actorUserId: req.user.id, action: 'admin.delete_user', entityType: 'user', entityId: target.id, details: { email: target.email } });
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -513,6 +578,7 @@ app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, ne
         [tenantId, name, type, model, temperature, tools, systemPrompt]
       );
     }
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.framework_activate', entityType: 'ai_agent', entityId: tenantId, details: { model } });
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, type, model, temperature, approval_rule as "approvalRule",
               status, tools, system_prompt as "systemPrompt"
@@ -584,6 +650,7 @@ app.post('/api/campaigns', requireAuth, async (req, res, next) => {
                  created_at as "createdAt", updated_at as "updatedAt"`,
       [tenantId, data.name, req.user.id, data.stage, data.progress, data.budget, data.leadsCount, data.channels]
     );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'campaign.create', entityType: 'campaign', entityId: result.rows[0].id, details: { name: result.rows[0].name, stage: result.rows[0].stage } });
     res.status(201).json({ ok: true, campaign: { ...result.rows[0], owner: req.user.name } });
   } catch (error) {
     next(error);
@@ -610,6 +677,7 @@ app.patch('/api/campaigns/:id', requireAuth, async (req, res, next) => {
       [req.params.id, tenantId, data.name, data.stage, data.progress, data.budget, data.leadsCount, data.channels]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'campaign not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'campaign.update', entityType: 'campaign', entityId: result.rows[0].id, details: { name: result.rows[0].name, stage: result.rows[0].stage } });
     res.json({ ok: true, campaign: result.rows[0] });
   } catch (error) {
     next(error);
@@ -619,8 +687,10 @@ app.patch('/api/campaigns/:id', requireAuth, async (req, res, next) => {
 app.delete('/api/campaigns/:id', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
-    const result = await pool.query('delete from campaigns where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query('delete from campaigns where id = $1 and tenant_id = $2 returning id, name', [req.params.id, tenantId]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'campaign not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'campaign.delete', entityType: 'campaign', entityId: result.rows[0].id, details: { name: result.rows[0].name } });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -657,6 +727,7 @@ app.post('/api/leads', requireAuth, async (req, res, next) => {
                  next_action as "nextAction", created_at as "createdAt", updated_at as "updatedAt"`,
       [tenantId, data.company, data.contactName, data.email, data.score, data.source, data.stage, req.user.id, data.nextAction]
     );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'lead.create', entityType: 'lead', entityId: result.rows[0].id, details: { company: result.rows[0].company, stage: result.rows[0].stage } });
     res.status(201).json({ ok: true, lead: result.rows[0] });
   } catch (error) {
     next(error);
@@ -683,6 +754,7 @@ app.patch('/api/leads/:id', requireAuth, async (req, res, next) => {
       [req.params.id, getScopedTenantId(req), data.company, data.contactName, data.email, data.score, data.source, data.stage, data.nextAction]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'lead not found' });
+    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'lead.update', entityType: 'lead', entityId: result.rows[0].id, details: { company: result.rows[0].company, stage: result.rows[0].stage } });
     res.json({ ok: true, lead: result.rows[0] });
   } catch (error) {
     next(error);
@@ -692,8 +764,10 @@ app.patch('/api/leads/:id', requireAuth, async (req, res, next) => {
 app.delete('/api/leads/:id', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
-    const result = await pool.query('delete from leads where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query('delete from leads where id = $1 and tenant_id = $2 returning id, company', [req.params.id, tenantId]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'lead not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'lead.delete', entityType: 'lead', entityId: result.rows[0].id, details: { company: result.rows[0].company } });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -727,6 +801,7 @@ app.post('/api/customers', requireAuth, async (req, res, next) => {
        returning id, name, health, plan, mrr, status, created_at as "createdAt"`,
       [getScopedTenantId(req), data.name, data.health, data.plan, data.mrr, data.status]
     );
+    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'customer.create', entityType: 'customer', entityId: result.rows[0].id, details: { name: result.rows[0].name, status: result.rows[0].status } });
     res.status(201).json({ ok: true, customer: result.rows[0] });
   } catch (error) {
     next(error);
@@ -749,6 +824,7 @@ app.patch('/api/customers/:id', requireAuth, async (req, res, next) => {
       [req.params.id, getScopedTenantId(req), data.name, data.health, data.plan, data.mrr, data.status]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'customer not found' });
+    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'customer.update', entityType: 'customer', entityId: result.rows[0].id, details: { name: result.rows[0].name, status: result.rows[0].status } });
     res.json({ ok: true, customer: result.rows[0] });
   } catch (error) {
     next(error);
@@ -758,8 +834,10 @@ app.patch('/api/customers/:id', requireAuth, async (req, res, next) => {
 app.delete('/api/customers/:id', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
-    const result = await pool.query('delete from customers where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query('delete from customers where id = $1 and tenant_id = $2 returning id, name', [req.params.id, tenantId]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'customer not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'customer.delete', entityType: 'customer', entityId: result.rows[0].id, details: { name: result.rows[0].name } });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -793,6 +871,7 @@ app.post('/api/follow-ups', requireAuth, async (req, res, next) => {
        returning id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
       [getScopedTenantId(req), data.title, req.user.id, data.dueAt, data.priority, data.channel, data.status]
     );
+    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'follow_up.create', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status } });
     res.status(201).json({ ok: true, task: result.rows[0] });
   } catch (error) {
     next(error);
@@ -815,6 +894,7 @@ app.patch('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
       [req.params.id, getScopedTenantId(req), data.title, data.dueAt, data.priority, data.channel, data.status]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'follow-up task not found' });
+    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'follow_up.update', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status } });
     res.json({ ok: true, task: result.rows[0] });
   } catch (error) {
     next(error);
@@ -824,8 +904,10 @@ app.patch('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
 app.delete('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
-    const result = await pool.query('delete from follow_up_tasks where id = $1 and tenant_id = $2 returning id', [req.params.id, getScopedTenantId(req)]);
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query('delete from follow_up_tasks where id = $1 and tenant_id = $2 returning id, title', [req.params.id, tenantId]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'follow-up task not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'follow_up.delete', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -873,6 +955,7 @@ app.post('/api/social/accounts', requireAuth, async (req, res, next) => {
                  created_at as "createdAt", updated_at as "updatedAt"`,
       [tenantId, platform, handle, JSON.stringify(credentials), status, req.user.id]
     );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'social_account.upsert', entityType: 'social_account', entityId: result.rows[0].id, details: { platform, handle, status, credentialKeys: Object.keys(credentials) } });
     res.status(201).json({ ok: true, account: maskSocialAccount(result.rows[0]) });
   } catch (error) {
     next(error);
@@ -886,10 +969,11 @@ app.delete('/api/social/accounts/:id', requireAuth, async (req, res, next) => {
       return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can remove social accounts' });
     }
     const result = await pool.query(
-      'delete from social_accounts where id = $1 and tenant_id = $2 returning id',
+      'delete from social_accounts where id = $1 and tenant_id = $2 returning id, platform, handle',
       [req.params.id, tenantId]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'social account not found' });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'social_account.delete', entityType: 'social_account', entityId: result.rows[0].id, details: { platform: result.rows[0].platform, handle: result.rows[0].handle } });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -1001,6 +1085,7 @@ app.post('/api/ai/agents', requirePlatformAdmin, async (req, res, next) => {
                  approval_rule as "approvalRule", status, tools, system_prompt as "systemPrompt"`,
       [tenantId, agent.name, agent.type, agent.model, agent.temperature, agent.approvalRule, agent.status, agent.tools, agent.systemPrompt]
     );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.agent_create', entityType: 'ai_agent', entityId: result.rows[0].id, details: { name: agent.name, model: agent.model, type: agent.type } });
     res.status(201).json({ ok: true, agent: result.rows[0] });
   } catch (error) {
     next(error);
@@ -1027,6 +1112,7 @@ app.put('/api/ai/agents/:id', requirePlatformAdmin, async (req, res, next) => {
       [req.params.id, agent.name, agent.type, agent.model, agent.temperature, agent.approvalRule, agent.status, agent.tools, agent.systemPrompt]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'agent not found' });
+    await logAudit({ tenantId: result.rows[0].tenantId, actorUserId: req.user.id, action: 'ai.agent_update', entityType: 'ai_agent', entityId: result.rows[0].id, details: { name: result.rows[0].name, model: result.rows[0].model, type: result.rows[0].type } });
     res.json({ ok: true, agent: result.rows[0] });
   } catch (error) {
     next(error);
@@ -1056,6 +1142,7 @@ app.post('/api/ai/agents/:id/run', requireAuth, async (req, res, next) => {
       actionType: req.body?.actionType || null,
       actionPayload: req.body?.actionPayload || {}
     });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.agent_run', entityType: 'approval', entityId: approval.id, details: { agent: agent.name, risk: approval.risk } });
 
     res.json({ ok: true, output, approval });
   } catch (error) {
@@ -1085,6 +1172,7 @@ app.post('/api/ai/workflows', requireAuth, async (req, res, next) => {
       actionType: action.type,
       actionPayload: action.payload
     });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.workflow_generated', entityType: 'approval', entityId: approval.id, details: { workflowType: workflow.type, title: workflow.title, actionType: action.type } });
 
     res.status(202).json({ ok: true, output, approval, action });
   } catch (error) {
@@ -1125,6 +1213,7 @@ app.post('/api/paperclip/tasks', requirePlatformAdmin, async (req, res, next) =>
       actionType: req.body?.actionType || null,
       actionPayload: req.body?.actionPayload || {}
     });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'paperclip.task_create', entityType: 'approval', entityId: approval.id, details: { task: payload.task, model: payload.model } });
     res.status(202).json({ ok: true, task: paperclipResponse, approval });
   } catch (error) {
     next(error);
@@ -1183,6 +1272,7 @@ app.patch('/api/approvals/:id', requireAuth, async (req, res, next) => {
                   created_at as "createdAt", decided_at as "decidedAt"`,
       [req.params.id, tenantId, status, req.user.email, req.body?.decisionNote || null, execution ? JSON.stringify(execution) : null]
     );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: `approval.${status}`, entityType: 'approval', entityId: result.rows[0].id, details: { title: result.rows[0].title, actionType: result.rows[0].actionType, execution } });
     res.json({ ok: true, approval: result.rows[0] });
   } catch (error) {
     next(error);
