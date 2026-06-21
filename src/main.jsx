@@ -264,7 +264,12 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
   const [socialAccounts, setSocialAccounts] = useState([]);
   const [message, setMessage] = useState('');
 
-  useEffect(() => { loadUsers(); loadSocialAccounts(); }, [tenantId]);
+  useEffect(() => {
+    if (!isPlatformAdmin) {
+      loadUsers();
+      loadSocialAccounts();
+    }
+  }, [tenantId, isPlatformAdmin]);
 
   async function loadUsers() {
     const result = await api(`/api/admin/users?tenantId=${tenantId}`);
@@ -375,7 +380,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>Tenant admin password<input value={tenantForm.adminPassword} onChange={(event) => setTenantForm({ ...tenantForm, adminPassword: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create company</button>
         </form>}
-        <form className="agentForm" onSubmit={createUser}>
+        {!isPlatformAdmin && <form className="agentForm" onSubmit={createUser}>
           <h3>Create Tenant User</h3>
           <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required /></label>
           <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
@@ -384,14 +389,14 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>Team<input value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })} /></label>
           <label>Avatar URL<input value={userForm.avatarUrl} onChange={(event) => setUserForm({ ...userForm, avatarUrl: event.target.value })} placeholder="https://..." /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create user</button>
-        </form>
-        <form className="agentForm" onSubmit={changeUserPassword}>
+        </form>}
+        {!isPlatformAdmin && <form className="agentForm" onSubmit={changeUserPassword}>
           <h3>Reset User Password</h3>
           <label>User<select value={passwordForm.userId} onChange={(event) => setPasswordForm({ ...passwordForm, userId: event.target.value })}><option value="">Select user</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label>
           <label>New password<input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label>
           <button className="primaryButton" type="submit"><KeyRound size={16} /> Update password</button>
-        </form>
-        <form className="agentForm" onSubmit={saveSocialAccount}>
+        </form>}
+        {!isPlatformAdmin && <form className="agentForm" onSubmit={saveSocialAccount}>
           <h3>Social Handles</h3>
           <label>Platform<select value={socialForm.platform} onChange={(event) => setSocialForm({ ...socialForm, platform: event.target.value })}><option>Instagram</option><option>Facebook</option><option>LinkedIn</option><option>X / Twitter</option><option>YouTube</option><option>Email</option></select></label>
           <label>Handle / page<input value={socialForm.handle} onChange={(event) => setSocialForm({ ...socialForm, handle: event.target.value })} placeholder="@brand or page name" required /></label>
@@ -400,26 +405,26 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>App secret<input type="password" value={socialForm.appSecret} onChange={(event) => setSocialForm({ ...socialForm, appSecret: event.target.value })} /></label>
           <label>Page / account ID<input value={socialForm.pageId} onChange={(event) => setSocialForm({ ...socialForm, pageId: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Check size={16} /> Save handle</button>
-        </form>
+        </form>}
         <div className="agentCards adminList">
           {isPlatformAdmin && <article className="agentCard companyList"><h3>Companies</h3>{tenants.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.plan} · {item.status}</p></div><div className="miniActions"><button onClick={() => setTenantStatus(item.id, item.status === 'Restricted' ? 'Active' : 'Restricted')}>{item.status === 'Restricted' ? 'Activate' : 'Restrict'}</button><button className="dangerButton" onClick={() => deleteTenant(item.id)}><Trash2 size={14} /></button></div></div>)}</article>}
-          <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email} · {item.role}</p></div><div className="miniActions"><span className={item.isActive ? 'badge' : 'badge danger'}>{item.isActive ? 'Active' : 'Inactive'}</span><button onClick={() => toggleUserAccess(item)}>{item.isActive ? 'Disable' : 'Enable'}</button>{item.platformRole !== 'platform_admin' && <button className="dangerButton" onClick={() => deleteUser(item)}><Trash2 size={14} /></button>}</div></div>)}</article>
-          <article className="agentCard companyList"><h3>Agent Social Access</h3>{socialAccounts.length ? socialAccounts.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.platform}</strong><p>{item.handle} · {item.credentialKeys?.length || 0} credential keys</p></div><div className="miniActions"><span className="badge">{item.status}</span><button className="dangerButton" onClick={() => deleteSocialAccount(item.id)}><Trash2 size={14} /></button></div></div>) : <p>No social handles configured yet.</p>}</article>
-          <ActivityPanel tenantId={tenantId} />
+          {!isPlatformAdmin && <article className="agentCard companyList"><h3>Users</h3>{users.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.name}</strong><p>{item.email} · {item.role}</p></div><div className="miniActions"><span className={item.isActive ? 'badge' : 'badge danger'}>{item.isActive ? 'Active' : 'Inactive'}</span><button onClick={() => toggleUserAccess(item)}>{item.isActive ? 'Disable' : 'Enable'}</button>{item.platformRole !== 'platform_admin' && <button className="dangerButton" onClick={() => deleteUser(item)}><Trash2 size={14} /></button>}</div></div>)}</article>}
+          {!isPlatformAdmin && <article className="agentCard companyList"><h3>Agent Social Access</h3>{socialAccounts.length ? socialAccounts.map((item) => <div className="companyRow" key={item.id}><div><strong>{item.platform}</strong><p>{item.handle} · {item.credentialKeys?.length || 0} credential keys</p></div><div className="miniActions"><span className="badge">{item.status}</span><button className="dangerButton" onClick={() => deleteSocialAccount(item.id)}><Trash2 size={14} /></button></div></div>) : <p>No social handles configured yet.</p>}</article>}
+          <ActivityPanel tenantId={tenantId} isPlatformAdmin={isPlatformAdmin} />
         </div>
       </div>
     </Panel>
   </section>;
 }
 
-function ActivityPanel({ tenantId }) {
+function ActivityPanel({ tenantId, isPlatformAdmin = false }) {
   const [auditLogs, setAuditLogs] = useState([]);
   const [emailLogs, setEmailLogs] = useState([]);
   useEffect(() => {
     api(`/api/admin/audit-logs?tenantId=${tenantId}`).then((result) => setAuditLogs(result.logs || [])).catch(() => {});
     api(`/api/admin/email-logs?tenantId=${tenantId}`).then((result) => setEmailLogs(result.logs || [])).catch(() => {});
   }, [tenantId]);
-  return <article className="agentCard companyList"><h3>Activity & Email Logs</h3><div className="activityGrid"><div>{auditLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.action}</strong><p>{item.actor || 'System'} · {formatDue(item.createdAt)}</p></div>)}</div><div>{emailLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.status}: {item.recipient}</strong><p>{item.subject}</p></div>)}</div></div></article>;
+  return <article className="agentCard companyList"><h3>{isPlatformAdmin ? 'Complete Platform Logs' : 'My Activity & Email Logs'}</h3><div className="activityGrid"><div>{auditLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.action}</strong><p>{item.actor || 'System'} · {formatDue(item.createdAt)}</p></div>)}</div><div>{emailLogs.slice(0, 6).map((item) => <div className="logRow" key={item.id}><strong>{item.status}: {item.recipient}</strong><p>{item.subject}</p></div>)}</div></div></article>;
 }
 
 function Overview({ tenantId, canApprove }) {
@@ -696,7 +701,7 @@ function AgentAdmin({ tenantId, isAdmin }) {
 }
 
 function Settings({ tenant, user, systemStatus, tenantId, canManageEmail, canManageTenantBrand, isPlatformAdmin }) {
-  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><ObservabilityPanel tenantId={tenantId} /><PasswordPanel /><ProfilePanel tenant={tenant} user={user} canManageTenant={canManageTenantBrand} /><EmailConfigPanel tenantId={tenantId} canManageEmail={canManageEmail} isPlatformAdmin={isPlatformAdmin} /></div></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={Settings2} title="Tenant & Production Settings" action="Live"><div className="settingsGrid"><SettingsList title="Tenant" items={[['Name', tenant.name], ['Plan', tenant.plan], ['Status', tenant.status], ['Signed in as', `${user.name} · ${user.role}`]]} /><SettingsList title="Security" items={[['Approval mode', 'Required for publish/send actions'], ['Tenant isolation', 'API scoped by login token'], ['AI configuration', 'Platform admin only']]} /><SettingsList title="Integrations" items={[['Paperclip', systemStatus?.paperclip?.ok ? 'Online' : systemStatus?.paperclip?.error || 'Unavailable'], ['Ollama', systemStatus?.ollama?.ok ? 'Online' : systemStatus?.ollama?.error || 'Unavailable'], ['CRM API', '/api']]} /><ObservabilityPanel tenantId={tenantId} /><PasswordPanel /><ProfilePanel tenant={tenant} user={user} canManageTenant={canManageTenantBrand} /><EmailConfigPanel tenantId={tenantId} canManageEmail={canManageEmail} isPlatformAdmin={isPlatformAdmin} /><ActivityPanel tenantId={tenantId} isPlatformAdmin={isPlatformAdmin} /></div></Panel></section>;
 }
 
 function ObservabilityPanel({ tenantId }) {

@@ -177,7 +177,7 @@ app.get('/api/system/status', requireAuth, async (_req, res) => {
 
 app.get('/api/system/observability', requireAuth, async (req, res, next) => {
   try {
-    if (!canManageTenantUsers(req.user, getScopedTenantId(req))) {
+    if (!canViewOperationalMetrics(req.user, getScopedTenantId(req))) {
       return res.status(403).json({ ok: false, error: 'Admin access required' });
     }
     const tenantId = getScopedTenantId(req);
@@ -325,6 +325,9 @@ app.delete('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next
 app.get('/api/admin/users', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
+    if (!canManageTenantUsers(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can view tenant users' });
+    }
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, email, role, platform_role as "platformRole",
               team, initials, avatar_url as "avatarUrl", is_active as "isActive",
@@ -386,7 +389,7 @@ app.patch('/api/admin/users/:id', requireAuth, async (req, res, next) => {
     if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
     const target = userResult.rows[0];
     if (!canManageTenantUsers(req.user, target.tenantId)) {
-      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can update this user' });
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can update tenant users' });
     }
     if (target.platformRole === 'platform_admin' && target.id !== req.user.id) {
       return res.status(403).json({ ok: false, error: 'Platform admin users cannot be updated here' });
@@ -421,7 +424,7 @@ app.delete('/api/admin/users/:id', requireAuth, async (req, res, next) => {
     if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
     const target = userResult.rows[0];
     if (!canManageTenantUsers(req.user, target.tenantId)) {
-      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can delete this user' });
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can delete tenant users' });
     }
     if (target.id === req.user.id || target.platformRole === 'platform_admin') {
       return res.status(400).json({ ok: false, error: 'This user cannot be deleted from tenant administration' });
@@ -450,7 +453,7 @@ app.post('/api/admin/users/:id/password', requireAuth, async (req, res, next) =>
     if (!userResult.rowCount) return res.status(404).json({ ok: false, error: 'user not found' });
     const target = userResult.rows[0];
     if (!canManageTenantUsers(req.user, target.tenantId)) {
-      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can change this user password' });
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can change tenant user passwords' });
     }
     if (target.platformRole === 'platform_admin' && !isPlatformAdmin(req.user)) {
       return res.status(403).json({ ok: false, error: 'Platform admin password can only be changed by that admin' });
@@ -541,16 +544,16 @@ app.post('/api/email/test', requireAuth, async (req, res, next) => {
 app.get('/api/admin/audit-logs', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
-    if (!canManageTenantUsers(req.user, tenantId)) return res.status(403).json({ ok: false, error: 'Admin access required' });
     const result = await pool.query(
       `select al.id, al.action, al.entity_type as "entityType", al.entity_id as "entityId",
               al.details, al.created_at as "createdAt", u.email as actor
          from audit_logs al
          left join app_users u on u.id = al.actor_user_id
-        where al.tenant_id = $1 or $2 = true
+        where $2 = true
+           or (al.tenant_id = $1 and al.actor_user_id = $3)
         order by al.created_at desc
         limit 100`,
-      [tenantId, isPlatformAdmin(req.user)]
+      [tenantId, isPlatformAdmin(req.user), req.user.id]
     );
     res.json({ ok: true, logs: result.rows });
   } catch (error) {
@@ -561,15 +564,15 @@ app.get('/api/admin/audit-logs', requireAuth, async (req, res, next) => {
 app.get('/api/admin/email-logs', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
-    if (!canManageTenantUsers(req.user, tenantId)) return res.status(403).json({ ok: false, error: 'Admin access required' });
     const result = await pool.query(
       `select id, tenant_id as "tenantId", recipient, subject, status,
               provider_message_id as "providerMessageId", error, created_at as "createdAt"
          from email_delivery_logs
-        where tenant_id = $1 or $2 = true
+        where $2 = true
+           or (tenant_id = $1 and lower(recipient) = lower($3))
         order by created_at desc
         limit 100`,
-      [tenantId, isPlatformAdmin(req.user)]
+      [tenantId, isPlatformAdmin(req.user), req.user.email]
     );
     res.json({ ok: true, logs: result.rows });
   } catch (error) {
@@ -1184,6 +1187,9 @@ app.patch('/api/scheduled-jobs/:id', requireAuth, async (req, res, next) => {
 app.get('/api/social/accounts', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
+    if (!canManageSocialAccounts(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can view social accounts' });
+    }
     const result = await pool.query(
       `select id, tenant_id as "tenantId", platform, handle, credentials, status,
               created_at as "createdAt", updated_at as "updatedAt"
@@ -1201,8 +1207,8 @@ app.get('/api/social/accounts', requireAuth, async (req, res, next) => {
 app.post('/api/social/accounts', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
-    if (!canManageTenantUsers(req.user, tenantId)) {
-      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can configure social accounts' });
+    if (!canManageSocialAccounts(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can configure social accounts' });
     }
     const platform = cleanString(req.body?.platform);
     const handle = cleanString(req.body?.handle) || '';
@@ -1232,8 +1238,8 @@ app.post('/api/social/accounts', requireAuth, async (req, res, next) => {
 app.delete('/api/social/accounts/:id', requireAuth, async (req, res, next) => {
   try {
     const tenantId = getScopedTenantId(req);
-    if (!canManageTenantUsers(req.user, tenantId)) {
-      return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can remove social accounts' });
+    if (!canManageSocialAccounts(req.user, tenantId)) {
+      return res.status(403).json({ ok: false, error: 'Only tenant admins can remove social accounts' });
     }
     const result = await pool.query(
       'delete from social_accounts where id = $1 and tenant_id = $2 returning id, platform, handle',
@@ -2460,7 +2466,15 @@ function getScopedTenantId(req) {
 }
 
 function canManageTenantUsers(user, tenantId) {
-  return isPlatformAdmin(user) || (user.tenantId === tenantId && user.platformRole === 'tenant_admin');
+  return user?.tenantId === tenantId && user.platformRole === 'tenant_admin';
+}
+
+function canManageSocialAccounts(user, tenantId) {
+  return user?.tenantId === tenantId && user.platformRole === 'tenant_admin';
+}
+
+function canViewOperationalMetrics(user, tenantId) {
+  return isPlatformAdmin(user) || (user?.tenantId === tenantId && user.platformRole === 'tenant_admin');
 }
 
 function canDecideApprovals(user) {

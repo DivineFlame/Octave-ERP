@@ -120,6 +120,8 @@ This repository currently ships:
 - Database-backed customer relationship dashboard
 - Admin AI-agent configuration for Paperclip and Ollama
 - Platform-admin company and tenant-user creation
+- Platform admin creates companies and the initial tenant admin only
+- Tenant admins manage tenant users, user password resets, and tenant social media credentials
 - Login-based tenant isolation
 - Human approval and audit-oriented workflow surfaces
 - Backend API service
@@ -141,6 +143,7 @@ This repository currently ships:
 - Password reset tokens, audit logs, and email delivery logs
 - Admin/tenant-admin user activation, deactivation, and deletion controls
 - Audit trail coverage for tenant, user, campaign, lead, customer, follow-up, social account, AI workflow, and approval actions
+- Complete audit/email logs are visible only to platform admin; tenant admins and tenant users see only their own log entries
 - AES-GCM encryption for newly saved SMTP passwords and social media credentials using `APP_SECRET`
 - Local persistent upload storage for tenant logos, user avatars, and image assets
 - CSV lead import/export and lead-to-customer conversion
