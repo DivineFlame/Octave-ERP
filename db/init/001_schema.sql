@@ -6,6 +6,10 @@ create table if not exists tenants (
   plan text not null default 'Starter',
   status text not null default 'Active',
   logo_url text,
+  company_domain text,
+  products_services text,
+  target_markets text,
+  brand_voice text,
   created_at timestamptz not null default now()
 );
 
@@ -32,6 +36,10 @@ alter table app_users add column if not exists is_active boolean not null defaul
 alter table app_users add column if not exists must_change_password boolean not null default false;
 alter table app_users add column if not exists updated_at timestamptz not null default now();
 alter table tenants add column if not exists logo_url text;
+alter table tenants add column if not exists company_domain text;
+alter table tenants add column if not exists products_services text;
+alter table tenants add column if not exists target_markets text;
+alter table tenants add column if not exists brand_voice text;
 alter table app_users add column if not exists avatar_url text;
 
 create table if not exists campaigns (
@@ -130,6 +138,17 @@ create table if not exists social_accounts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (tenant_id, platform)
+);
+
+create table if not exists social_templates (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null references tenants(id) on delete cascade,
+  title text not null,
+  platform text not null,
+  template_type text not null default 'Post',
+  content text not null,
+  variables text[] not null default '{}',
+  created_at timestamptz not null default now()
 );
 
 create table if not exists email_configs (

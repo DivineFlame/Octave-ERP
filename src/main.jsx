@@ -260,6 +260,7 @@ function Stats({ systemStatus, tenantId }) {
 function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAdmin }) {
   const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
   const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
+  const [tenantProfile, setTenantProfile] = useState({ companyDomain: '', productsServices: '', targetMarkets: '', brandVoice: '' });
   const [passwordForm, setPasswordForm] = useState({ userId: '', newPassword: 'User@12345' });
   const [socialForm, setSocialForm] = useState({ platform: 'Instagram', handle: '', accessToken: '', appId: '', appSecret: '', pageId: '', status: 'Active' });
   const [users, setUsers] = useState([]);
@@ -270,6 +271,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     if (!isPlatformAdmin) {
       loadUsers();
       loadSocialAccounts();
+      loadTenantProfile();
     }
   }, [tenantId, isPlatformAdmin]);
 
@@ -281,6 +283,16 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
   async function loadSocialAccounts() {
     const result = await api(`/api/social/accounts?tenantId=${tenantId}`);
     setSocialAccounts(result.accounts || []);
+  }
+
+  async function loadTenantProfile() {
+    const result = await api(`/api/tenant/profile?tenantId=${tenantId}`);
+    setTenantProfile({
+      companyDomain: result.tenant?.companyDomain || '',
+      productsServices: result.tenant?.productsServices || '',
+      targetMarkets: result.tenant?.targetMarkets || '',
+      brandVoice: result.tenant?.brandVoice || ''
+    });
   }
 
   async function createTenant(event) {
@@ -301,6 +313,19 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     setUsers([...created, ...users]);
     setUserForm({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
     setMessage(`Created ${created.length} user(s). Email ${deliveryText(result.emailDelivery)}`);
+  }
+
+  async function saveTenantProfile(event) {
+    event.preventDefault();
+    setMessage('');
+    const result = await api('/api/tenant/profile', { method: 'PATCH', body: JSON.stringify({ ...tenantProfile, tenantId }) });
+    setTenantProfile({
+      companyDomain: result.tenant.companyDomain || '',
+      productsServices: result.tenant.productsServices || '',
+      targetMarkets: result.tenant.targetMarkets || '',
+      brandVoice: result.tenant.brandVoice || ''
+    });
+    setMessage('Company domain, products, services, and brand context saved for AI agents');
   }
 
   async function setTenantStatus(id, status) {
@@ -385,13 +410,21 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>Dummy user password<input value={tenantForm.dummyUserPassword} onChange={(event) => setTenantForm({ ...tenantForm, dummyUserPassword: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create company</button>
         </form>}
+        {!isPlatformAdmin && <form className="agentForm" onSubmit={saveTenantProfile}>
+          <h3>Company Domain</h3>
+          <label>Domain / industry<input value={tenantProfile.companyDomain} onChange={(event) => setTenantProfile({ ...tenantProfile, companyDomain: event.target.value })} placeholder="Healthcare, real estate, SaaS..." /></label>
+          <label>Products & services<textarea rows="4" value={tenantProfile.productsServices} onChange={(event) => setTenantProfile({ ...tenantProfile, productsServices: event.target.value })} placeholder="List core products, services, offers, packages" /></label>
+          <label>Target markets<textarea rows="3" value={tenantProfile.targetMarkets} onChange={(event) => setTenantProfile({ ...tenantProfile, targetMarkets: event.target.value })} placeholder="Customer segments, locations, industries" /></label>
+          <label>Brand voice<textarea rows="3" value={tenantProfile.brandVoice} onChange={(event) => setTenantProfile({ ...tenantProfile, brandVoice: event.target.value })} placeholder="Professional, premium, friendly, technical..." /></label>
+          <button className="primaryButton" type="submit"><Check size={16} /> Save company context</button>
+        </form>}
         {!isPlatformAdmin && <form className="agentForm" onSubmit={createUser}>
           <h3>Create Tenant User</h3>
           <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
           <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
           <label>Password<input value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
           <label>Access<select value={userForm.platformRole} onChange={(event) => setUserForm({ ...userForm, platformRole: event.target.value, role: event.target.selectedOptions[0].text })}><option value="tenant_user">Tenant User</option><option value="tenant_admin">Tenant Admin</option><option value="approver">Approver</option></select></label>
-          <label>Team<input value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })} /></label>
+          <label>Function<select value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })}><option>Marketing</option><option>Social Media</option><option>Lead Generation</option><option>Follow-ups</option><option>Sales</option><option>Customer Success</option><option>Approvals</option><option>Analytics</option><option>Administration</option></select></label>
           <label>Avatar URL<input value={userForm.avatarUrl} onChange={(event) => setUserForm({ ...userForm, avatarUrl: event.target.value })} placeholder="https://..." /></label>
           <label>Additional dummy users<input type="number" min="0" max="50" value={userForm.dummyUserCount} onChange={(event) => setUserForm({ ...userForm, dummyUserCount: event.target.value })} /></label>
           <label>Dummy user password<input value={userForm.dummyUserPassword} onChange={(event) => setUserForm({ ...userForm, dummyUserPassword: event.target.value })} /></label>
@@ -466,7 +499,7 @@ function Marketing({ tenantId, canApprove }) {
     await api(`/api/campaigns/${id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
     setItems((current) => current.filter((item) => item.id !== id));
   }
-  return <section className="contentGrid"><Panel wide icon={CalendarDays} title="Campaign Command Center" action="New campaign">{message && <div className="statusStrip"><strong>{message}</strong><span>Stored in PostgreSQL</span></div>}<div className="moduleGrid"><form className="agentForm" onSubmit={createCampaign}><h3>Create Campaign</h3><label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>Draft</option><option>AI drafting</option><option>Human approval</option><option>Scheduled</option></select></label><label>Progress<input type="number" min="0" max="100" value={form.progress} onChange={(event) => setForm({ ...form, progress: event.target.value })} /></label><label>Budget<input type="number" min="0" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></label><label>Leads<input type="number" min="0" value={form.leadsCount} onChange={(event) => setForm({ ...form, leadsCount: event.target.value })} /></label><label>Channels<input value={form.channels} onChange={(event) => setForm({ ...form, channels: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save campaign</button></form><div className="campaignList">{items.map((campaign) => <CampaignRow campaign={campaign} key={campaign.id} onSchedule={() => updateCampaign(campaign.id, 'Scheduled')} onDelete={() => deleteCampaign(campaign.id)} />)}</div></div></Panel><PublishingQueue /><Panel icon={ShieldCheck} title="Approval Queue" action="Approve"><ApprovalList tenantId={tenantId} canApprove={canApprove} /></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={CalendarDays} title="Campaign Command Center" action="New campaign">{message && <div className="statusStrip"><strong>{message}</strong><span>Stored in PostgreSQL</span></div>}<div className="moduleGrid"><form className="agentForm" onSubmit={createCampaign}><h3>Create Campaign</h3><label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Stage<select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })}><option>Draft</option><option>AI drafting</option><option>Human approval</option><option>Scheduled</option></select></label><label>Progress<input type="number" min="0" max="100" value={form.progress} onChange={(event) => setForm({ ...form, progress: event.target.value })} /></label><label>Budget<input type="number" min="0" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></label><label>Leads<input type="number" min="0" value={form.leadsCount} onChange={(event) => setForm({ ...form, leadsCount: event.target.value })} /></label><label>Channels<input value={form.channels} onChange={(event) => setForm({ ...form, channels: event.target.value })} /></label><button className="primaryButton" type="submit"><Plus size={16} /> Save campaign</button></form><div className="campaignList">{items.map((campaign) => <CampaignRow campaign={campaign} key={campaign.id} onSchedule={() => updateCampaign(campaign.id, 'Scheduled')} onDelete={() => deleteCampaign(campaign.id)} />)}</div></div></Panel><PublishingQueue tenantId={tenantId} /><Panel icon={ShieldCheck} title="Approval Queue" action="Approve"><ApprovalList tenantId={tenantId} canApprove={canApprove} /></Panel></section>;
 }
 
 function Leads({ tenantId }) {
@@ -581,7 +614,7 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
   const [editingAgentId, setEditingAgentId] = useState('');
   const [editAgent, setEditAgent] = useState(null);
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
-  const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', dueAt: '', priority: 'Medium', channel: 'Email' });
+  const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', platform: 'Instagram', templateType: 'Post', dueAt: '', priority: 'Medium', channel: 'Email' });
   const [jobs, setJobs] = useState([]);
   const [jobRuns, setJobRuns] = useState([]);
   const [jobForm, setJobForm] = useState({ name: 'Weekly campaign draft', schedule: 'Every Monday 09:00', nextRunAt: '', jobType: 'ai_workflow' });
@@ -735,9 +768,11 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
       </form>}
       {!isAdmin && <form className="agentForm" onSubmit={runWorkflow}>
         <h3>AI Workflow</h3>
-        <label>Workflow<select value={workflowForm.type} onChange={(event) => setWorkflowForm({ ...workflowForm, type: event.target.value })}><option value="campaign_brief">Campaign brief</option><option value="follow_up_email">Follow-up email</option><option value="follow_up_task">Follow-up task</option></select></label>
+        <label>Workflow<select value={workflowForm.type} onChange={(event) => setWorkflowForm({ ...workflowForm, type: event.target.value })}><option value="campaign_brief">Campaign brief</option><option value="social_template">Social template</option><option value="follow_up_email">Follow-up email</option><option value="follow_up_task">Follow-up task</option></select></label>
         <label>Title<input value={workflowForm.title} onChange={(event) => setWorkflowForm({ ...workflowForm, title: event.target.value })} /></label>
-        {workflowForm.type === 'campaign_brief' && <label>Campaign name<input value={workflowForm.campaignName} onChange={(event) => setWorkflowForm({ ...workflowForm, campaignName: event.target.value })} /></label>}
+        {(workflowForm.type === 'campaign_brief' || workflowForm.type === 'social_template') && <label>Campaign name<input value={workflowForm.campaignName} onChange={(event) => setWorkflowForm({ ...workflowForm, campaignName: event.target.value })} /></label>}
+        {workflowForm.type === 'social_template' && <label>Platform<select value={workflowForm.platform} onChange={(event) => setWorkflowForm({ ...workflowForm, platform: event.target.value })}><option>Instagram</option><option>Facebook</option><option>LinkedIn</option><option>X / Twitter</option><option>YouTube</option><option>Email</option></select></label>}
+        {workflowForm.type === 'social_template' && <label>Template type<select value={workflowForm.templateType} onChange={(event) => setWorkflowForm({ ...workflowForm, templateType: event.target.value })}><option>Post</option><option>Story</option><option>Reel Script</option><option>Carousel</option><option>Ad Copy</option><option>Email Social Promo</option></select></label>}
         {workflowForm.type === 'follow_up_email' && <label>Recipient email<input value={workflowForm.recipient} onChange={(event) => setWorkflowForm({ ...workflowForm, recipient: event.target.value })} /></label>}
         <label>Subject<input value={workflowForm.subject} onChange={(event) => setWorkflowForm({ ...workflowForm, subject: event.target.value })} /></label>
         <label>Channels<input value={workflowForm.channels} onChange={(event) => setWorkflowForm({ ...workflowForm, channels: event.target.value })} /></label>
@@ -911,8 +946,12 @@ function ApprovalList({ tenantId, canApprove = true }) {
 function CampaignRow({ campaign, onSchedule, onDelete }) {
   return <article className="campaignRow"><div><h3>{campaign.name}</h3><p>{campaign.owner || 'Unassigned'} · {campaign.stage}</p><div className="chips">{(campaign.channels || []).map((channel) => <span key={channel}>{channel}</span>)}</div></div><div className="progressBlock"><div className="progressMeta"><span>{campaign.progress}%</span><strong>{campaign.leadsCount || 0} leads</strong></div><div className="progressTrack"><span style={{ width: `${campaign.progress}%` }} /></div><small>{formatCurrency(campaign.budget)} budget</small><div className="miniActions"><button onClick={onSchedule}>Schedule</button><button className="dangerButton" onClick={onDelete}><Trash2 size={14} /></button></div></div></article>;
 }
-function PublishingQueue() {
-  return <Panel icon={MessageSquareText} title="Publishing Queue" action="Draft post"><div className="timeline">{posts.map(([time, title, channel, status]) => <div className="timeItem" key={title}><span className="time">{time}</span><div><strong>{title}</strong><p>{channel} · {status}</p></div></div>)}</div></Panel>;
+function PublishingQueue({ tenantId }) {
+  const [templates, setTemplates] = useState([]);
+  useEffect(() => { api(`/api/social-templates?tenantId=${tenantId}`).then((result) => setTemplates(result.templates || [])).catch(() => {}); }, [tenantId]);
+  const fallback = posts.map(([time, title, channel, status]) => ({ id: title, createdAt: time, title, platform: channel, templateType: status, content: '' }));
+  const items = templates.length ? templates : fallback;
+  return <Panel icon={MessageSquareText} title="Social Templates" action="Draft post"><div className="timeline">{items.map((item) => <div className="timeItem" key={item.id}><span className="time">{templates.length ? item.platform : item.createdAt}</span><div><strong>{item.title}</strong><p>{item.platform} · {item.templateType}</p>{item.content && <small>{firstWords(item.content, 18)}</small>}</div></div>)}</div></Panel>;
 }
 function Panel({ icon, title, action, wide, children }) {
   return <div className={wide ? 'widePanel' : 'panel'}><PanelHeader icon={icon} title={title} action={action} />{children}</div>;
@@ -941,6 +980,11 @@ function formatCurrency(value) {
 function formatDue(value) {
   if (!value) return 'No due date';
   return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function firstWords(value, count = 16) {
+  const words = String(value || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  return words.slice(0, count).join(' ') + (words.length > count ? '...' : '');
 }
 
 createRoot(document.getElementById('root')).render(<App />);

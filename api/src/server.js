@@ -158,7 +158,11 @@ app.post('/api/auth/login', rateLimit('login', 12, 15 * 60 * 1000), async (req, 
       `select u.id, u.tenant_id, u.name, u.email, u.password_hash, u.role, u.platform_role,
               u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
               t.name as tenant_name, t.plan,
-              t.status as tenant_status, t.logo_url as tenant_logo_url
+              t.status as tenant_status, t.logo_url as tenant_logo_url,
+              t.company_domain as tenant_company_domain,
+              t.products_services as tenant_products_services,
+              t.target_markets as tenant_target_markets,
+              t.brand_voice as tenant_brand_voice
          from app_users u
          join tenants t on t.id = u.tenant_id
         where lower(u.email) = $1`,
@@ -310,7 +314,10 @@ app.get('/api/tenants', requireAuth, async (req, res, next) => {
       return res.json({ ok: true, tenants: [req.user.tenant] });
     }
     const result = await pool.query(
-      `select t.id, t.name, t.plan, t.status, t.logo_url as "logoUrl", count(u.id)::int as users
+      `select t.id, t.name, t.plan, t.status, t.logo_url as "logoUrl",
+              t.company_domain as "companyDomain", t.products_services as "productsServices",
+              t.target_markets as "targetMarkets", t.brand_voice as "brandVoice",
+              count(u.id)::int as users
         from tenants t
         left join app_users u on u.tenant_id = t.id
         where t.id <> $1
@@ -344,7 +351,9 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
     const tenant = await client.query(
       `insert into tenants (id, name, plan, status)
        values ($1,$2,$3,$4)
-       returning id, name, plan, status, logo_url as "logoUrl"`,
+       returning id, name, plan, status, logo_url as "logoUrl",
+                 company_domain as "companyDomain", products_services as "productsServices",
+                 target_markets as "targetMarkets", brand_voice as "brandVoice"`,
       [tenantId, name, plan, status]
     );
     if (logoUrl) {
@@ -375,6 +384,8 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
         team: 'Marketing'
       }));
     }
+    const agentModel = await pickDefaultModel();
+    await provisionTenantAgents(client, tenantId, agentModel, 6);
     await client.query('commit');
     const emailDelivery = user ? await sendCredentialEmail({
       tenantId: null,
@@ -385,7 +396,7 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
       createdBy: req.user,
       tenant: tenant.rows[0]
     }) : { sent: false, skipped: true, reason: 'tenant admin credentials not provided' };
-    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_tenant', entityType: 'tenant', entityId: tenantId, details: { name, plan, status, adminEmail } });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_tenant', entityType: 'tenant', entityId: tenantId, details: { name, plan, status, adminEmail, provisionedAgents: 6 } });
     res.status(201).json({ ok: true, tenant: tenant.rows[0], user, dummyUsers, emailDelivery });
   } catch (error) {
     await client.query('rollback');
@@ -412,7 +423,9 @@ app.patch('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next)
               status = coalesce($4, status),
               logo_url = coalesce($5, logo_url)
         where id = $1
-        returning id, name, plan, status, logo_url as "logoUrl"`,
+        returning id, name, plan, status, logo_url as "logoUrl",
+                  company_domain as "companyDomain", products_services as "productsServices",
+                  target_markets as "targetMarkets", brand_voice as "brandVoice"`,
       [req.params.id, name || null, plan || null, status || null, logoUrl || null]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
@@ -432,6 +445,59 @@ app.delete('/api/admin/tenants/:id', requirePlatformAdmin, async (req, res, next
     const result = await pool.query('delete from tenants where id = $1 returning id, name', [req.params.id]);
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'company not found' });
     await logAudit({ tenantId: null, actorUserId: req.user.id, action: 'admin.delete_tenant', entityType: 'tenant', entityId: result.rows[0].id, details: { name: result.rows[0].name } });
+    res.json({ ok: true, tenant: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/tenant/profile', requireAuth, async (req, res, next) => {
+  if (isPlatformAdmin(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Platform admins cannot edit tenant operating profiles' });
+  }
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select id, name, plan, status, logo_url as "logoUrl",
+              company_domain as "companyDomain", products_services as "productsServices",
+              target_markets as "targetMarkets", brand_voice as "brandVoice"
+         from tenants
+        where id = $1`,
+      [tenantId]
+    );
+    if (!result.rowCount) return res.status(404).json({ ok: false, error: 'tenant profile not found' });
+    res.json({ ok: true, tenant: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/tenant/profile', requireAuth, async (req, res, next) => {
+  if (isPlatformAdmin(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Platform admins cannot edit tenant operating profiles' });
+  }
+  const tenantId = getScopedTenantId(req);
+  if (!canManageTenantUsers(req.user, tenantId)) {
+    return res.status(403).json({ ok: false, error: 'Only tenant admins can update company domain and services' });
+  }
+  const companyDomain = cleanString(req.body?.companyDomain || req.body?.company_domain);
+  const productsServices = cleanString(req.body?.productsServices || req.body?.products_services);
+  const targetMarkets = cleanString(req.body?.targetMarkets || req.body?.target_markets);
+  const brandVoice = cleanString(req.body?.brandVoice || req.body?.brand_voice);
+  try {
+    const result = await pool.query(
+      `update tenants
+          set company_domain = $2,
+              products_services = $3,
+              target_markets = $4,
+              brand_voice = $5
+        where id = $1
+        returning id, name, plan, status, logo_url as "logoUrl",
+                  company_domain as "companyDomain", products_services as "productsServices",
+                  target_markets as "targetMarkets", brand_voice as "brandVoice"`,
+      [tenantId, companyDomain || null, productsServices || null, targetMarkets || null, brandVoice || null]
+    );
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'tenant.profile_update', entityType: 'tenant', entityId: tenantId, details: { companyDomain, targetMarkets, brandVoice } });
     res.json({ ok: true, tenant: result.rows[0] });
   } catch (error) {
     next(error);
@@ -763,17 +829,7 @@ app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, ne
   try {
     const model = cleanString(req.body?.model) || await pickDefaultModel();
     const requestedCount = boundedInt(req.body?.agentCount ?? req.body?.count, 1, AGENT_TEMPLATES.length, 6);
-    const templates = AGENT_TEMPLATES.slice(0, requestedCount);
-    for (const template of templates) {
-      await pool.query(
-        `insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
-         select $1,$2,$3,$4,$5,'Human approval before execution','Ready',$6,$7
-          where not exists (
-            select 1 from ai_agents where tenant_id = $1 and name = $2
-          )`,
-        [tenantId, template.name, template.type, model, template.temperature, template.tools, template.systemPrompt]
-      );
-    }
+    const templates = await provisionTenantAgents(pool, tenantId, model, requestedCount);
     await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.framework_activate', entityType: 'ai_agent', entityId: tenantId, details: { model, requestedCount, templates: templates.map((template) => template.key) } });
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, type, model, temperature, approval_rule as "approvalRule",
@@ -1615,6 +1671,25 @@ app.post('/api/ai/workflows', requireAuth, async (req, res, next) => {
   }
 });
 
+app.get('/api/social-templates', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select id, title, platform, template_type as "templateType", content, variables,
+              created_at as "createdAt"
+         from social_templates
+        where tenant_id = $1
+        order by created_at desc
+        limit 50`,
+      [tenantId]
+    );
+    res.json({ ok: true, templates: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/paperclip/status', requireAuth, async (_req, res) => {
   const result = await checkPaperclip();
   res.status(result.ok ? 200 : 502).json(result);
@@ -1742,7 +1817,11 @@ async function requireAuth(req, res, next) {
       `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
               u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
               t.name as tenant_name, t.plan,
-              t.status as tenant_status, t.logo_url as tenant_logo_url
+              t.status as tenant_status, t.logo_url as tenant_logo_url,
+              t.company_domain as tenant_company_domain,
+              t.products_services as tenant_products_services,
+              t.target_markets as tenant_target_markets,
+              t.brand_voice as tenant_brand_voice
          from app_users u
          join tenants t on t.id = u.tenant_id
         where u.id = $1`,
@@ -1802,6 +1881,10 @@ async function ensureSchema() {
     alter table app_users add column if not exists must_change_password boolean not null default false;
     alter table app_users add column if not exists updated_at timestamptz not null default now();
     alter table tenants add column if not exists logo_url text;
+    alter table tenants add column if not exists company_domain text;
+    alter table tenants add column if not exists products_services text;
+    alter table tenants add column if not exists target_markets text;
+    alter table tenants add column if not exists brand_voice text;
     alter table app_users add column if not exists avatar_url text;
     create table if not exists campaigns (
       id uuid primary key default gen_random_uuid(),
@@ -1893,6 +1976,16 @@ async function ensureSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (tenant_id, platform)
+    );
+    create table if not exists social_templates (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id text not null references tenants(id) on delete cascade,
+      title text not null,
+      platform text not null,
+      template_type text not null default 'Post',
+      content text not null,
+      variables text[] not null default '{}',
+      created_at timestamptz not null default now()
     );
     create table if not exists email_configs (
       tenant_id text primary key,
@@ -2114,7 +2207,9 @@ async function getPaperclipModels() {
 }
 
 async function runAgent(agent, prompt, tenantId) {
-  const paperclip = await tryPaperclipAgent(agent, prompt, tenantId);
+  const tenantContext = await getTenantContext(tenantId);
+  const enrichedPrompt = buildTenantPrompt(prompt, tenantContext);
+  const paperclip = await tryPaperclipAgent(agent, enrichedPrompt, tenantId, tenantContext);
   if (paperclip.ok) return paperclip.output;
 
   const response = await fetch(`${ollamaBaseUrl}/api/generate`, {
@@ -2122,7 +2217,7 @@ async function runAgent(agent, prompt, tenantId) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model: agent.model,
-      prompt: `${agent.system_prompt || ''}\n\n${prompt}`,
+      prompt: `${agent.system_prompt || ''}\n\n${enrichedPrompt}`,
       stream: false,
       options: { temperature: Number(agent.temperature || 0.4) }
     })
@@ -2132,12 +2227,27 @@ async function runAgent(agent, prompt, tenantId) {
   return body.response || '';
 }
 
-async function tryPaperclipAgent(agent, prompt, tenantId) {
+async function provisionTenantAgents(client, tenantId, model, count = 6) {
+  const templates = AGENT_TEMPLATES.slice(0, boundedInt(count, 1, AGENT_TEMPLATES.length, 6));
+  for (const template of templates) {
+    await client.query(
+      `insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
+       select $1,$2,$3,$4,$5,'Human approval before execution','Ready',$6,$7
+        where not exists (
+          select 1 from ai_agents where tenant_id = $1 and name = $2
+        )`,
+      [tenantId, template.name, template.type, model, template.temperature, template.tools, template.systemPrompt]
+    );
+  }
+  return templates;
+}
+
+async function tryPaperclipAgent(agent, prompt, tenantId, tenantContext = null) {
   try {
     const response = await fetch(`${paperclipBaseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tenantId, agent, prompt, requireApproval: true })
+      body: JSON.stringify({ tenantId, tenantContext, agent, prompt, requireApproval: true })
     });
     if (!response.ok) return { ok: false };
     const body = await safeJson(response);
@@ -2145,6 +2255,29 @@ async function tryPaperclipAgent(agent, prompt, tenantId) {
   } catch {
     return { ok: false };
   }
+}
+
+async function getTenantContext(tenantId) {
+  const result = await pool.query(
+    `select id, name, plan, status, company_domain as "companyDomain",
+            products_services as "productsServices", target_markets as "targetMarkets",
+            brand_voice as "brandVoice"
+       from tenants
+      where id = $1`,
+    [tenantId]
+  );
+  return result.rows[0] || { id: tenantId };
+}
+
+function buildTenantPrompt(prompt, tenant) {
+  const context = [
+    `Tenant company: ${tenant?.name || tenant?.id || 'Unknown'}`,
+    `Company domain: ${tenant?.companyDomain || 'Not defined'}`,
+    `Products and services: ${tenant?.productsServices || 'Not defined'}`,
+    `Target markets: ${tenant?.targetMarkets || 'Not defined'}`,
+    `Brand voice: ${tenant?.brandVoice || 'Professional, clear, and helpful'}`
+  ].join('\n');
+  return `${context}\n\nUse this tenant context for every recommendation, template, and draft. Do not invent credentials or publish anything without approval.\n\nTask:\n${prompt}`;
 }
 
 async function forwardToPaperclip(payload) {
@@ -2184,6 +2317,8 @@ function normalizeWorkflow(input = {}) {
     risk: cleanString(input.risk) || 'Medium',
     campaignName: cleanString(input.campaignName),
     channels: normalizeTextArray(input.channels),
+    platform: cleanString(input.platform) || 'Instagram',
+    templateType: cleanString(input.templateType || input.template_type) || 'Post',
     dueAt: cleanString(input.dueAt) || null,
     priority: cleanString(input.priority) || 'Medium',
     channel: cleanString(input.channel) || 'Email'
@@ -2193,6 +2328,7 @@ function normalizeWorkflow(input = {}) {
 async function findWorkflowAgent(tenantId, type) {
   const typeMap = {
     campaign_brief: ['Planning', 'Content', 'General'],
+    social_template: ['Content', 'Scheduling', 'Planning', 'General'],
     follow_up_email: ['Follow-up', 'Content', 'General'],
     follow_up_task: ['Follow-up', 'Planning', 'General']
   };
@@ -2214,6 +2350,15 @@ function buildWorkflowPrompt(workflow) {
 Channels: ${workflow.channels.join(', ') || 'Email, Social'}.
 Context: ${workflow.context || 'No extra context.'}
 Return a practical brief with audience, offer, message, channel plan, and approval notes.`;
+  }
+  if (workflow.type === 'social_template') {
+    return `Create a reusable social media template.
+Platform: ${workflow.platform}
+Template type: ${workflow.templateType}
+Campaign or subject: ${workflow.campaignName || workflow.subject || workflow.title}
+Channels: ${workflow.channels.join(', ') || workflow.platform}
+Context: ${workflow.context || 'No extra context.'}
+Return a template with headline/hook, caption body, CTA, hashtag guidance, visual direction, and editable variables in {{variable}} format.`;
   }
   if (workflow.type === 'follow_up_email') {
     return `Draft a professional follow-up email.
@@ -2261,6 +2406,18 @@ function buildWorkflowAction(workflow, output) {
       }
     };
   }
+  if (workflow.type === 'social_template') {
+    return {
+      type: 'create_social_template',
+      payload: {
+        title: workflow.title,
+        platform: workflow.platform,
+        templateType: workflow.templateType,
+        content: output,
+        variables: extractTemplateVariables(output)
+      }
+    };
+  }
   if (workflow.type === 'follow_up_task') {
     return {
       type: 'create_follow_up_task',
@@ -2299,6 +2456,22 @@ async function executeApprovalAction({ tenantId, actionType, actionPayload }) {
     );
     return { executed: true, actionType, task: result.rows[0] };
   }
+  if (actionType === 'create_social_template') {
+    const result = await pool.query(
+      `insert into social_templates (tenant_id, title, platform, template_type, content, variables)
+       values ($1,$2,$3,$4,$5,$6)
+       returning id, title, platform`,
+      [
+        tenantId,
+        cleanString(payload.title) || 'Approved social template',
+        cleanString(payload.platform) || 'Social',
+        cleanString(payload.templateType || payload.template_type) || 'Post',
+        cleanString(payload.content) || '',
+        normalizeTextArray(payload.variables)
+      ]
+    );
+    return { executed: true, actionType, template: result.rows[0] };
+  }
   if (actionType === 'send_email') {
     if (!payload.to || !payload.subject || !payload.text) return { executed: false, actionType, reason: 'Email action requires recipient, subject, and text' };
     const delivery = await sendMailWithConfig({
@@ -2311,6 +2484,10 @@ async function executeApprovalAction({ tenantId, actionType, actionPayload }) {
     return { executed: Boolean(delivery.sent), actionType, delivery };
   }
   return { executed: false, actionType, reason: 'Unsupported action type' };
+}
+
+function extractTemplateVariables(text = '') {
+  return [...new Set([...String(text).matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => cleanString(match[1])).filter(Boolean))];
 }
 
 async function createUser(client, { tenantId, name, email, password, role, platformRole, team, avatarUrl }) {
@@ -2331,7 +2508,11 @@ async function loadUserById(id) {
     `select u.id, u.tenant_id, u.name, u.email, u.role, u.platform_role,
             u.team, u.initials, u.avatar_url, u.is_active, u.must_change_password,
             t.name as tenant_name, t.plan,
-            t.status as tenant_status, t.logo_url as tenant_logo_url
+            t.status as tenant_status, t.logo_url as tenant_logo_url,
+            t.company_domain as tenant_company_domain,
+            t.products_services as tenant_products_services,
+            t.target_markets as tenant_target_markets,
+            t.brand_voice as tenant_brand_voice
        from app_users u
        join tenants t on t.id = u.tenant_id
       where u.id = $1`,
@@ -2690,7 +2871,11 @@ function toSafeUser(row) {
       name: row.tenant_name,
       plan: row.plan,
       status: row.tenant_status,
-      logoUrl: row.tenant_logo_url
+      logoUrl: row.tenant_logo_url,
+      companyDomain: row.tenant_company_domain,
+      productsServices: row.tenant_products_services,
+      targetMarkets: row.tenant_target_markets,
+      brandVoice: row.tenant_brand_voice
     }
   };
 }

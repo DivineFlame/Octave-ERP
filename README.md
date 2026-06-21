@@ -188,9 +188,12 @@ The included API service exposes:
 - `POST /api/email/test`
 - `PATCH /api/settings/profile`
 - `POST /api/uploads`
+- `GET /api/tenant/profile`
+- `PATCH /api/tenant/profile`
 - `GET /api/social/accounts`
 - `POST /api/social/accounts`
 - `DELETE /api/social/accounts/:id`
+- `GET /api/social-templates`
 - `GET /api/ai/ollama/status`
 - `GET /api/ai/ollama/models`
 - `GET /api/ai/ollama/installed`
@@ -237,6 +240,8 @@ The included API service exposes:
 ## Agent templates
 
 Platform admin can select a tenant, choose the required number of agents, and activate the framework from the AI Agents view. The backend ships templates for campaign strategy, social copy, content scheduling, social listening, lead scoring, lead nurture, email outreach, CRM relationship management, retention, task allocation, analytics insight, and approval governance. Each saved agent remains editable for model, temperature, function, tools, status, approval rule, and system prompt.
+
+Tenant admins define company domain, products and services, target markets, and brand voice from Tenant Setup. Paperclip/Ollama prompts automatically include this tenant context so agents create campaign, follow-up, CRM, and social media drafts against the correct business profile. Approved social-template workflows are persisted as reusable social templates for the tenant.
 - `GET /api/customers`
 - `POST /api/customers`
 - `PATCH /api/customers/:id`
