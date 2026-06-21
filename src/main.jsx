@@ -54,6 +54,7 @@ const navBase = [
   ['Follow-ups', Workflow], ['Customers', Users], ['AI Agents', Bot], ['Settings', Settings2]
 ];
 const platformNav = [['Admin', UserCog], ['AI Agents', Bot], ['Settings', Settings2]];
+const tenantAdminNav = [['Tenant Setup', UserCog], ...navBase];
 
 function App() {
   const [session, setSession] = useState(null);
@@ -190,7 +191,7 @@ function Workspace({ session, onLogout }) {
   const [tenantId, setTenantId] = useState(session.user.tenantId);
   const [systemStatus, setSystemStatus] = useState(null);
   const canManageTenant = isAdmin || session.user.platformRole === 'tenant_admin';
-  const nav = isAdmin ? platformNav : canManageTenant ? [['Admin', UserCog], ...navBase] : navBase;
+  const nav = isAdmin ? platformNav : session.user.platformRole === 'tenant_admin' ? tenantAdminNav : navBase;
   const tenant = tenants.find((item) => item.id === tenantId) || session.user.tenant;
 
   useEffect(() => {
@@ -209,7 +210,8 @@ function Workspace({ session, onLogout }) {
         <Topbar user={session.user} tenants={tenants} tenantId={tenantId} setTenantId={setTenantId} onLogout={onLogout} isAdmin={isAdmin} />
         {!isAdmin && <Hero tenant={tenant} />}
         {!isAdmin && <Stats systemStatus={systemStatus} tenantId={tenantId} />}
-        {view === 'Admin' && canManageTenant && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={isAdmin} />}
+        {view === 'Admin' && isAdmin && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={isAdmin} />}
+        {view === 'Tenant Setup' && session.user.platformRole === 'tenant_admin' && <AdminConsole tenants={tenants} setTenants={setTenants} tenantId={tenantId} setTenantId={setTenantId} isPlatformAdmin={false} />}
         {!isAdmin && view === 'Overview' && <Overview tenantId={tenantId} canApprove={session.user.platformRole === 'tenant_admin' || session.user.platformRole === 'approver'} />}
         {!isAdmin && view === 'Marketing' && <Marketing tenantId={tenantId} canApprove={session.user.platformRole === 'tenant_admin' || session.user.platformRole === 'approver'} />}
         {!isAdmin && view === 'Leads' && <Leads tenantId={tenantId} />}
@@ -367,7 +369,7 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
   }
 
   return <section className="contentGrid">
-    <Panel wide icon={UserCog} title={isPlatformAdmin ? 'Platform Admin Console' : 'Tenant Admin Console'} action="Secure">
+    <Panel wide icon={UserCog} title={isPlatformAdmin ? 'Platform Admin Console' : 'Tenant Setup'} action="Secure">
       {message && <div className="statusStrip"><strong>{message}</strong><span>Changes are saved in PostgreSQL</span></div>}
       <div className="adminGrid">
         {isPlatformAdmin && <form className="agentForm" onSubmit={createTenant}>
