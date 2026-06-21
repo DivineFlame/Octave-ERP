@@ -122,6 +122,7 @@ This repository currently ships:
 - Platform-admin company and tenant-user creation
 - Platform admin creates companies and the initial tenant admin only
 - Tenant admins manage tenant users, user password resets, and tenant social media credentials
+- Tenant admins can create a requested number of dummy tenant users with temporary credentials
 - Fresh deployments seed only the internal `Octave Platform` account and platform admin; no Northstar demo tenant is created
 - Login-based tenant isolation
 - Human approval and audit-oriented workflow surfaces
@@ -151,6 +152,7 @@ This repository currently ships:
 - Local persistent upload storage for tenant logos, user avatars, and image assets
 - CSV lead import/export and lead-to-customer conversion
 - CRM notes/timeline records for leads, customers, and related entities
+- Follow-up task allocation to active tenant users
 - Scheduled AI job records for recurring workflow planning
 - Background worker container for scheduled AI jobs, retries, locking, run history, and approval draft creation
 - Production observability endpoint for service status, email, audit, approval, and schedule counts
@@ -208,6 +210,7 @@ The included API service exposes:
 - `PATCH /api/approvals/:id`
 - `GET /api/system/status`
 - `GET /api/dashboard/summary`
+- `GET /api/users/assignable`
 - `GET /api/campaigns`
 - `POST /api/campaigns`
 - `PATCH /api/campaigns/:id`

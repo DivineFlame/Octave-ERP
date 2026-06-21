@@ -80,8 +80,8 @@ function App() {
 
 function LoginPage({ onLogin }) {
   const resetToken = new URLSearchParams(window.location.search).get('resetToken') || '';
-  const [email, setEmail] = useState('admin@octave.local');
-  const [password, setPassword] = useState('Admin@12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [resetEmail, setResetEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [mode, setMode] = useState(resetToken ? 'reset' : 'login');
@@ -258,8 +258,8 @@ function Stats({ systemStatus, tenantId }) {
 }
 
 function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAdmin }) {
-  const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
-  const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '' });
+  const [tenantForm, setTenantForm] = useState({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
   const [passwordForm, setPasswordForm] = useState({ userId: '', newPassword: 'User@12345' });
   const [socialForm, setSocialForm] = useState({ platform: 'Instagram', handle: '', accessToken: '', appId: '', appSecret: '', pageId: '', status: 'Active' });
   const [users, setUsers] = useState([]);
@@ -289,17 +289,18 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
     const result = await api('/api/admin/tenants', { method: 'POST', body: JSON.stringify(tenantForm) });
     setTenants([result.tenant, ...tenants]);
     setTenantId(result.tenant.id);
-    setTenantForm({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345' });
-    setMessage(`Created ${result.tenant.name}. Email ${deliveryText(result.emailDelivery)}`);
+    setTenantForm({ name: '', plan: 'Starter', logoUrl: '', adminName: '', adminEmail: '', adminPassword: 'Tenant@12345', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
+    setMessage(`Created ${result.tenant.name}. ${result.dummyUsers?.length || 0} dummy user(s). Email ${deliveryText(result.emailDelivery)}`);
   }
 
   async function createUser(event) {
     event.preventDefault();
     setMessage('');
     const result = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ ...userForm, tenantId }) });
-    setUsers([result.user, ...users]);
-    setUserForm({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '' });
-    setMessage(`Created user ${result.user.email}. Email ${deliveryText(result.emailDelivery)}`);
+    const created = [result.user, ...(result.dummyUsers || [])].filter(Boolean);
+    setUsers([...created, ...users]);
+    setUserForm({ name: '', email: '', password: 'User@12345', role: 'Tenant User', platformRole: 'tenant_user', team: 'Marketing', avatarUrl: '', dummyUserCount: 0, dummyUserPassword: 'User@12345' });
+    setMessage(`Created ${created.length} user(s). Email ${deliveryText(result.emailDelivery)}`);
   }
 
   async function setTenantStatus(id, status) {
@@ -380,17 +381,21 @@ function AdminConsole({ tenants, setTenants, tenantId, setTenantId, isPlatformAd
           <label>Tenant admin name<input value={tenantForm.adminName} onChange={(event) => setTenantForm({ ...tenantForm, adminName: event.target.value })} /></label>
           <label>Tenant admin email<input value={tenantForm.adminEmail} onChange={(event) => setTenantForm({ ...tenantForm, adminEmail: event.target.value })} /></label>
           <label>Tenant admin password<input value={tenantForm.adminPassword} onChange={(event) => setTenantForm({ ...tenantForm, adminPassword: event.target.value })} /></label>
+          <label>Dummy tenant users<input type="number" min="0" max="50" value={tenantForm.dummyUserCount} onChange={(event) => setTenantForm({ ...tenantForm, dummyUserCount: event.target.value })} /></label>
+          <label>Dummy user password<input value={tenantForm.dummyUserPassword} onChange={(event) => setTenantForm({ ...tenantForm, dummyUserPassword: event.target.value })} /></label>
           <button className="primaryButton" type="submit"><Plus size={16} /> Create company</button>
         </form>}
         {!isPlatformAdmin && <form className="agentForm" onSubmit={createUser}>
           <h3>Create Tenant User</h3>
-          <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required /></label>
-          <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required /></label>
-          <label>Password<input value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} required /></label>
+          <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
+          <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
+          <label>Password<input value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} required={Number(userForm.dummyUserCount || 0) === 0} /></label>
           <label>Access<select value={userForm.platformRole} onChange={(event) => setUserForm({ ...userForm, platformRole: event.target.value, role: event.target.selectedOptions[0].text })}><option value="tenant_user">Tenant User</option><option value="tenant_admin">Tenant Admin</option><option value="approver">Approver</option></select></label>
           <label>Team<input value={userForm.team} onChange={(event) => setUserForm({ ...userForm, team: event.target.value })} /></label>
           <label>Avatar URL<input value={userForm.avatarUrl} onChange={(event) => setUserForm({ ...userForm, avatarUrl: event.target.value })} placeholder="https://..." /></label>
-          <button className="primaryButton" type="submit"><Plus size={16} /> Create user</button>
+          <label>Additional dummy users<input type="number" min="0" max="50" value={userForm.dummyUserCount} onChange={(event) => setUserForm({ ...userForm, dummyUserCount: event.target.value })} /></label>
+          <label>Dummy user password<input value={userForm.dummyUserPassword} onChange={(event) => setUserForm({ ...userForm, dummyUserPassword: event.target.value })} /></label>
+          <button className="primaryButton" type="submit"><Plus size={16} /> Create user(s)</button>
         </form>}
         {!isPlatformAdmin && <form className="agentForm" onSubmit={changeUserPassword}>
           <h3>Reset User Password</h3>
@@ -509,27 +514,37 @@ function Leads({ tenantId }) {
 
 function FollowUps({ tenantId }) {
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ title: '', dueAt: '', priority: 'Medium', channel: 'Email', status: 'Open' });
-  useEffect(() => { loadTasks(); }, [tenantId]);
+  const [assignableUsers, setAssignableUsers] = useState([]);
+  const [form, setForm] = useState({ title: '', ownerUserId: '', dueAt: '', priority: 'Medium', channel: 'Email', status: 'Open' });
+  useEffect(() => { loadTasks(); loadAssignableUsers(); }, [tenantId]);
   async function loadTasks() {
     const result = await api(`/api/follow-ups?tenantId=${tenantId}`);
     setItems(result.tasks || []);
+  }
+  async function loadAssignableUsers() {
+    const result = await api(`/api/users/assignable?tenantId=${tenantId}`);
+    setAssignableUsers(result.users || []);
+    setForm((current) => current.ownerUserId ? current : { ...current, ownerUserId: result.users?.[0]?.id || '' });
   }
   async function createTask(event) {
     event.preventDefault();
     const result = await api('/api/follow-ups', { method: 'POST', body: JSON.stringify({ ...form, tenantId }) });
     setItems([result.task, ...items]);
-    setForm({ title: '', dueAt: '', priority: 'Medium', channel: 'Email', status: 'Open' });
+    setForm({ title: '', ownerUserId: assignableUsers[0]?.id || '', dueAt: '', priority: 'Medium', channel: 'Email', status: 'Open' });
   }
   async function completeTask(id) {
     const result = await api(`/api/follow-ups/${id}`, { method: 'PATCH', body: JSON.stringify({ tenantId, status: 'Done' }) });
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...result.task } : item));
+  }
+  async function assignTask(id, ownerUserId) {
+    const result = await api(`/api/follow-ups/${id}`, { method: 'PATCH', body: JSON.stringify({ tenantId, ownerUserId }) });
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...result.task } : item));
   }
   async function deleteTask(id) {
     await api(`/api/follow-ups/${id}`, { method: 'DELETE', body: JSON.stringify({ tenantId }) });
     setItems((current) => current.filter((item) => item.id !== id));
   }
-  return <section className="contentGrid"><Panel wide icon={Workflow} title="Follow-up Workbench" action="Create task"><div className="moduleGrid"><form className="agentForm" onSubmit={createTask}><h3>Create Task</h3><label>Title<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required /></label><label>Due at<input type="datetime-local" value={form.dueAt} onChange={(event) => setForm({ ...form, dueAt: event.target.value })} /></label><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option>Low</option><option>Medium</option><option>High</option></select></label><label>Channel<select value={form.channel} onChange={(event) => setForm({ ...form, channel: event.target.value })}><option>Email</option><option>Phone</option><option>Social</option><option>Meeting</option></select></label><button className="primaryButton" type="submit"><Plus size={16} /> Save task</button></form><div className="taskBoard">{items.map((task) => <article className="taskCard" key={task.id}><div><strong>{task.title}</strong><p>{task.channel} · {task.status}</p></div><span className={task.priority === 'High' ? 'badge danger' : 'badge'}>{task.priority}</span><small>{formatDue(task.dueAt)}</small><div className="miniActions"><button onClick={() => completeTask(task.id)}>Done</button><button className="dangerButton" onClick={() => deleteTask(task.id)}><Trash2 size={14} /></button></div></article>)}</div></div></Panel><Panel icon={PhoneCall} title="Today" action="Start"><SettingsList items={[['Open tasks', items.filter((task) => task.status !== 'Done').length], ['High priority', items.filter((task) => task.priority === 'High').length], ['Completed', items.filter((task) => task.status === 'Done').length]]} /></Panel></section>;
+  return <section className="contentGrid"><Panel wide icon={Workflow} title="Follow-up Workbench" action="Create task"><div className="moduleGrid"><form className="agentForm" onSubmit={createTask}><h3>Create Task</h3><label>Title<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required /></label><label>Assign to<select value={form.ownerUserId} onChange={(event) => setForm({ ...form, ownerUserId: event.target.value })}>{assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></label><label>Due at<input type="datetime-local" value={form.dueAt} onChange={(event) => setForm({ ...form, dueAt: event.target.value })} /></label><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option>Low</option><option>Medium</option><option>High</option></select></label><label>Channel<select value={form.channel} onChange={(event) => setForm({ ...form, channel: event.target.value })}><option>Email</option><option>Phone</option><option>Social</option><option>Meeting</option></select></label><button className="primaryButton" type="submit"><Plus size={16} /> Save task</button></form><div className="taskBoard">{items.map((task) => <article className="taskCard" key={task.id}><div><strong>{task.title}</strong><p>{task.channel} · {task.status}</p><p>Assigned to {task.owner || 'Unassigned'}</p></div><span className={task.priority === 'High' ? 'badge danger' : 'badge'}>{task.priority}</span><small>{formatDue(task.dueAt)}</small><label>Assign<select value={task.ownerUserId || ''} onChange={(event) => assignTask(task.id, event.target.value)}>{assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label><div className="miniActions"><button onClick={() => completeTask(task.id)}>Done</button><button className="dangerButton" onClick={() => deleteTask(task.id)}><Trash2 size={14} /></button></div></article>)}</div></div></Panel><Panel icon={PhoneCall} title="Today" action="Start"><SettingsList items={[['Open tasks', items.filter((task) => task.status !== 'Done').length], ['High priority', items.filter((task) => task.priority === 'High').length], ['Completed', items.filter((task) => task.status === 'Done').length]]} /></Panel></section>;
 }
 
 function Customers({ tenant }) {

@@ -234,6 +234,8 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
   const adminEmail = cleanString(req.body?.adminEmail)?.toLowerCase();
   const adminPassword = String(req.body?.adminPassword || '');
   const logoUrl = cleanString(req.body?.logoUrl) || null;
+  const dummyUserCount = boundedInt(req.body?.dummyUserCount, 0, 50, 0);
+  const dummyUserPassword = String(req.body?.dummyUserPassword || 'User@12345');
   if (!name) return res.status(400).json({ ok: false, error: 'company name is required' });
 
   const tenantId = slugify(req.body?.id || name);
@@ -262,6 +264,18 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
         team: 'Administration'
       });
     }
+    const dummyUsers = [];
+    for (let index = 1; index <= dummyUserCount; index += 1) {
+      dummyUsers.push(await createUser(client, {
+        tenantId,
+        name: `Demo User ${index}`,
+        email: `user${index}@${tenantId}.example`,
+        password: dummyUserPassword,
+        role: 'Tenant User',
+        platformRole: 'tenant_user',
+        team: 'Marketing'
+      }));
+    }
     await client.query('commit');
     const emailDelivery = user ? await sendCredentialEmail({
       tenantId: null,
@@ -273,7 +287,7 @@ app.post('/api/admin/tenants', requirePlatformAdmin, async (req, res, next) => {
       tenant: tenant.rows[0]
     }) : { sent: false, skipped: true, reason: 'tenant admin credentials not provided' };
     await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_tenant', entityType: 'tenant', entityId: tenantId, details: { name, plan, status, adminEmail } });
-    res.status(201).json({ ok: true, tenant: tenant.rows[0], user, emailDelivery });
+    res.status(201).json({ ok: true, tenant: tenant.rows[0], user, dummyUsers, emailDelivery });
   } catch (error) {
     await client.query('rollback');
     next(error);
@@ -352,18 +366,40 @@ app.post('/api/admin/users', requireAuth, async (req, res, next) => {
     if (!canManageTenantUsers(req.user, tenantId)) {
       return res.status(403).json({ ok: false, error: 'Only platform or tenant admins can create users' });
     }
-    const user = await createUser(pool, {
-      tenantId,
-      name: cleanString(req.body?.name),
-      email: cleanString(req.body?.email)?.toLowerCase(),
-      password: String(req.body?.password || ''),
-      role: cleanString(req.body?.role) || 'Tenant User',
-      platformRole: normalizePlatformRole(req.body?.platformRole || req.body?.role),
-      team: cleanString(req.body?.team),
-      avatarUrl: cleanString(req.body?.avatarUrl) || null
-    });
+    const dummyUserCount = boundedInt(req.body?.dummyUserCount, 0, 50, 0);
+    const dummyUserPassword = String(req.body?.dummyUserPassword || 'User@12345');
+    let user = null;
+    const name = cleanString(req.body?.name);
+    const email = cleanString(req.body?.email)?.toLowerCase();
+    const password = String(req.body?.password || '');
+    if (name || email || password) {
+      user = await createUser(pool, {
+        tenantId,
+        name,
+        email,
+        password,
+        role: cleanString(req.body?.role) || 'Tenant User',
+        platformRole: normalizePlatformRole(req.body?.platformRole || req.body?.role),
+        team: cleanString(req.body?.team),
+        avatarUrl: cleanString(req.body?.avatarUrl) || null
+      });
+    }
+    if (!user && !dummyUserCount) return res.status(400).json({ ok: false, error: 'Provide user details or dummy user count' });
+    const dummyUsers = [];
+    const stamp = Date.now();
+    for (let index = 1; index <= dummyUserCount; index += 1) {
+      dummyUsers.push(await createUser(pool, {
+        tenantId,
+        name: `Demo User ${index}`,
+        email: `demo${stamp}-${index}@${tenantId}.example`,
+        password: dummyUserPassword,
+        role: 'Tenant User',
+        platformRole: 'tenant_user',
+        team: cleanString(req.body?.team) || 'Marketing'
+      }));
+    }
     const tenantResult = await pool.query('select id, name, plan, status, logo_url as "logoUrl" from tenants where id = $1', [tenantId]);
-    const emailDelivery = await sendCredentialEmail({
+    const emailDelivery = user ? await sendCredentialEmail({
       tenantId: isPlatformAdmin(req.user) ? null : tenantId,
       to: user.email,
       name: user.name,
@@ -371,9 +407,9 @@ app.post('/api/admin/users', requireAuth, async (req, res, next) => {
       password: String(req.body?.password || ''),
       createdBy: req.user,
       tenant: tenantResult.rows[0]
-    });
-    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_user', entityType: 'user', entityId: user.id, details: { email: user.email, role: user.role, delivery: emailDelivery } });
-    res.status(201).json({ ok: true, user, emailDelivery });
+    }) : { sent: false, skipped: true, reason: 'only dummy users were created' };
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'admin.create_user', entityType: 'user', entityId: user?.id, details: { email: user?.email, role: user?.role, dummyUserCount, delivery: emailDelivery } });
+    res.status(201).json({ ok: true, user, dummyUsers, emailDelivery });
   } catch (error) {
     next(error);
   }
@@ -677,6 +713,23 @@ app.get('/api/dashboard/summary', requireAuth, async (req, res, next) => {
         tasks: tasks.rows[0].count
       }
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/users/assignable', requireAuth, async (req, res, next) => {
+  if (!requireTenantWorkspace(req, res)) return;
+  try {
+    const tenantId = getScopedTenantId(req);
+    const result = await pool.query(
+      `select id, name, email, role, team, initials, avatar_url as "avatarUrl"
+         from app_users
+        where tenant_id = $1 and is_active = true
+        order by name`,
+      [tenantId]
+    );
+    res.json({ ok: true, users: result.rows });
   } catch (error) {
     next(error);
   }
@@ -1031,10 +1084,12 @@ app.get('/api/follow-ups', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
     const result = await pool.query(
-      `select id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"
-         from follow_up_tasks
-        where tenant_id = $1
-        order by coalesce(due_at, created_at) asc`,
+      `select t.id, t.title, t.owner_user_id as "ownerUserId", coalesce(u.name, 'Unassigned') as owner,
+              t.due_at as "dueAt", t.priority, t.channel, t.status, t.created_at as "createdAt"
+         from follow_up_tasks t
+         left join app_users u on u.id = t.owner_user_id
+        where t.tenant_id = $1
+        order by coalesce(t.due_at, t.created_at) asc`,
       [getScopedTenantId(req)]
     );
     res.json({ ok: true, tasks: result.rows });
@@ -1046,16 +1101,18 @@ app.get('/api/follow-ups', requireAuth, async (req, res, next) => {
 app.post('/api/follow-ups', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
+    const tenantId = getScopedTenantId(req);
     const data = normalizeTask(req.body);
     if (!data.title) return res.status(400).json({ ok: false, error: 'task title is required' });
+    const ownerUserId = await resolveAssignableUserId(tenantId, data.ownerUserId || req.user.id);
     const result = await pool.query(
       `insert into follow_up_tasks (tenant_id, title, owner_user_id, due_at, priority, channel, status)
        values ($1,$2,$3,$4,$5,$6,$7)
-       returning id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
-      [getScopedTenantId(req), data.title, req.user.id, data.dueAt, data.priority, data.channel, data.status]
+       returning id, title, owner_user_id as "ownerUserId", due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
+      [tenantId, data.title, ownerUserId, data.dueAt, data.priority, data.channel, data.status]
     );
-    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'follow_up.create', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status } });
-    res.status(201).json({ ok: true, task: result.rows[0] });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'follow_up.create', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status, ownerUserId } });
+    res.status(201).json({ ok: true, task: { ...result.rows[0], owner: await userNameFor(ownerUserId) } });
   } catch (error) {
     next(error);
   }
@@ -1064,21 +1121,24 @@ app.post('/api/follow-ups', requireAuth, async (req, res, next) => {
 app.patch('/api/follow-ups/:id', requireAuth, async (req, res, next) => {
   if (!requireTenantWorkspace(req, res)) return;
   try {
+    const tenantId = getScopedTenantId(req);
     const data = normalizeTaskPatch(req.body);
+    const ownerUserId = data.ownerUserId ? await resolveAssignableUserId(tenantId, data.ownerUserId) : null;
     const result = await pool.query(
       `update follow_up_tasks
           set title = coalesce($3, title),
               due_at = coalesce($4, due_at),
               priority = coalesce($5, priority),
               channel = coalesce($6, channel),
-              status = coalesce($7, status)
+              status = coalesce($7, status),
+              owner_user_id = coalesce($8, owner_user_id)
         where id = $1 and tenant_id = $2
-        returning id, title, due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
-      [req.params.id, getScopedTenantId(req), data.title, data.dueAt, data.priority, data.channel, data.status]
+        returning id, title, owner_user_id as "ownerUserId", due_at as "dueAt", priority, channel, status, created_at as "createdAt"`,
+      [req.params.id, tenantId, data.title, data.dueAt, data.priority, data.channel, data.status, ownerUserId]
     );
     if (!result.rowCount) return res.status(404).json({ ok: false, error: 'follow-up task not found' });
-    await logAudit({ tenantId: getScopedTenantId(req), actorUserId: req.user.id, action: 'follow_up.update', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status } });
-    res.json({ ok: true, task: result.rows[0] });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'follow_up.update', entityType: 'follow_up_task', entityId: result.rows[0].id, details: { title: result.rows[0].title, status: result.rows[0].status, ownerUserId: result.rows[0].ownerUserId } });
+    res.json({ ok: true, task: { ...result.rows[0], owner: await userNameFor(result.rows[0].ownerUserId) } });
   } catch (error) {
     next(error);
   }
@@ -2181,6 +2241,18 @@ async function loadUserById(id) {
   return result.rowCount ? toSafeUser(result.rows[0]) : null;
 }
 
+async function resolveAssignableUserId(tenantId, userId) {
+  const result = await pool.query('select id from app_users where id = $1 and tenant_id = $2 and is_active = true', [userId, tenantId]);
+  if (!result.rowCount) throw new Error('Assigned user is not active in this tenant');
+  return result.rows[0].id;
+}
+
+async function userNameFor(userId) {
+  if (!userId) return 'Unassigned';
+  const result = await pool.query('select name from app_users where id = $1', [userId]);
+  return result.rows[0]?.name || 'Unassigned';
+}
+
 async function pickDefaultModel() {
   const tags = await getOllamaTags();
   return tags.models?.[0]?.name || process.env.DEFAULT_OLLAMA_MODEL || 'llama3.1:8b';
@@ -2433,6 +2505,7 @@ function normalizeCustomerPatch(input = {}) {
 function normalizeTask(input = {}) {
   return {
     title: cleanString(input.title),
+    ownerUserId: cleanString(input.ownerUserId || input.owner_user_id) || null,
     dueAt: cleanString(input.dueAt || input.due_at) || null,
     priority: cleanString(input.priority) || 'Medium',
     channel: cleanString(input.channel) || 'Email',
@@ -2443,6 +2516,7 @@ function normalizeTask(input = {}) {
 function normalizeTaskPatch(input = {}) {
   return {
     title: input.title === undefined ? null : cleanString(input.title),
+    ownerUserId: input.ownerUserId === undefined && input.owner_user_id === undefined ? null : cleanString(input.ownerUserId || input.owner_user_id),
     dueAt: input.dueAt === undefined && input.due_at === undefined ? null : cleanString(input.dueAt || input.due_at),
     priority: input.priority === undefined ? null : cleanString(input.priority),
     channel: input.channel === undefined ? null : cleanString(input.channel),
