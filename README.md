@@ -122,6 +122,7 @@ This repository currently ships:
 - Platform-admin company and tenant-user creation
 - Platform admin creates companies and the initial tenant admin only
 - Tenant admins manage tenant users, user password resets, and tenant social media credentials
+- Fresh deployments seed only the internal `Octave Platform` account and platform admin; no Northstar demo tenant is created
 - Login-based tenant isolation
 - Human approval and audit-oriented workflow surfaces
 - Backend API service
@@ -144,6 +145,8 @@ This repository currently ships:
 - Admin/tenant-admin user activation, deactivation, and deletion controls
 - Audit trail coverage for tenant, user, campaign, lead, customer, follow-up, social account, AI workflow, and approval actions
 - Complete audit/email logs are visible only to platform admin; tenant admins and tenant users see only their own log entries
+- Platform Settings is separated from Tenant Settings
+- Platform AI Agent Setup only configures agents for selected tenant companies, not the internal platform account
 - AES-GCM encryption for newly saved SMTP passwords and social media credentials using `APP_SECRET`
 - Local persistent upload storage for tenant logos, user avatars, and image assets
 - CSV lead import/export and lead-to-customer conversion

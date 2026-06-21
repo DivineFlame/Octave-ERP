@@ -20,7 +20,7 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER:-octave}:${POSTGRES_PASSWORD:-octave_password}@postgres:5432/${POSTGRES_DB:-octave_crm}
-      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-northstar}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-platform}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       PAPERCLIP_BASE_URL: ${PAPERCLIP_BASE_URL:-http://paperclip}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://38.247.188.228:3002}

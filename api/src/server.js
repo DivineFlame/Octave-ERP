@@ -11,7 +11,7 @@ const { Pool } = pg;
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const defaultTenantId = process.env.DEFAULT_TENANT_ID || 'northstar';
+const defaultTenantId = process.env.DEFAULT_TENANT_ID || 'platform';
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
 const paperclipBaseUrl = process.env.PAPERCLIP_BASE_URL || 'http://paperclip';
 const appSecret = process.env.APP_SECRET || 'change-this-octave-secret';
@@ -212,10 +212,13 @@ app.get('/api/tenants', requireAuth, async (req, res, next) => {
     }
     const result = await pool.query(
       `select t.id, t.name, t.plan, t.status, t.logo_url as "logoUrl", count(u.id)::int as users
-         from tenants t
-         left join app_users u on u.tenant_id = t.id
+        from tenants t
+        left join app_users u on u.tenant_id = t.id
+        where t.id <> $1
         group by t.id
         order by t.created_at desc`
+      ,
+      [defaultTenantId]
     );
     res.json({ ok: true, tenants: result.rows });
   } catch (error) {
@@ -1822,14 +1825,15 @@ async function ensureSchema() {
     `insert into tenants (id, name, plan, status)
      values ($1, $2, $3, $4)
      on conflict (id) do nothing`,
-    [defaultTenantId, 'Northstar Wellness', 'Growth', 'Active']
+    [defaultTenantId, 'Octave Platform', 'Platform', 'Active']
   );
 
   await pool.query(
     `insert into app_users (tenant_id, name, email, password_hash, role, platform_role, team, initials)
      values ($1,$2,$3,$4,$5,$6,$7,$8)
      on conflict (email) do update
-       set password_hash = excluded.password_hash,
+       set tenant_id = excluded.tenant_id,
+           password_hash = excluded.password_hash,
            role = excluded.role,
            platform_role = excluded.platform_role,
            is_active = true,
@@ -1857,7 +1861,11 @@ async function ensureSchema() {
     ['8da7c471aeae6572f0c6d65ac107ea6b:f10adcf9ffa987f02fe0849cc3006c1b91b9a2f18b5b974e09a77d4136a32636a581c6201e652e5190b1c0fd45177e65862f51142cc9c0e75284ff3fbb1911ac']
   );
 
-  await seedOperationalData(defaultTenantId);
+  await pool.query("delete from tenants where id = 'northstar' or name = 'Northstar Wellness'");
+
+  if (process.env.ENABLE_DEMO_DATA === 'true') {
+    await seedOperationalData(defaultTenantId);
+  }
 }
 
 async function seedOperationalData(tenantId) {
@@ -1887,8 +1895,8 @@ async function seedOperationalData(tenantId) {
   );
   await pool.query(
     `insert into customers (tenant_id, name, health, plan, mrr, status)
-     select $1, 'Northstar Wellness', 91, 'Growth', 120000, 'Expansion ready'
-      where not exists (select 1 from customers where tenant_id = $1 and name = 'Northstar Wellness')`,
+     select $1, 'Demo Growth Account', 91, 'Growth', 120000, 'Expansion ready'
+      where not exists (select 1 from customers where tenant_id = $1 and name = 'Demo Growth Account')`,
     [tenantId]
   );
   await pool.query(
