@@ -23,6 +23,105 @@ const pool = new Pool({
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false
 });
 
+const AGENT_TEMPLATES = [
+  {
+    key: 'campaign-strategist',
+    name: 'Campaign Strategist',
+    type: 'Planning',
+    temperature: 0.35,
+    tools: ['Market research', 'Audience map', 'Budget split', 'Campaign brief'],
+    systemPrompt: 'You are a digital marketing strategist. Create concise campaign plans, audiences, budgets, channels, and approval-ready briefs.'
+  },
+  {
+    key: 'social-copywriter',
+    name: 'Social Copywriter',
+    type: 'Content',
+    temperature: 0.7,
+    tools: ['Caption draft', 'Hashtag set', 'Tone rewrite', 'Content variants'],
+    systemPrompt: 'You write platform-specific social media posts with clear calls to action. Keep all output ready for human review.'
+  },
+  {
+    key: 'content-calendar',
+    name: 'Content Calendar Agent',
+    type: 'Scheduling',
+    temperature: 0.45,
+    tools: ['Calendar plan', 'Publishing slots', 'Content repurpose', 'Channel mix'],
+    systemPrompt: 'You organize approved ideas into a practical content calendar with channel, timing, owner, and approval notes.'
+  },
+  {
+    key: 'social-listening',
+    name: 'Social Listening Agent',
+    type: 'Monitoring',
+    temperature: 0.3,
+    tools: ['Mention review', 'Sentiment notes', 'Competitor watch', 'Trend summary'],
+    systemPrompt: 'You summarize social signals, competitor movement, and campaign feedback for the tenant team.'
+  },
+  {
+    key: 'lead-scoring',
+    name: 'Lead Scoring Agent',
+    type: 'Lead Generation',
+    temperature: 0.25,
+    tools: ['Lead score', 'Source analysis', 'Intent notes', 'Qualification reason'],
+    systemPrompt: 'You qualify leads from campaign and CRM context. Explain score, source quality, and the next best action.'
+  },
+  {
+    key: 'lead-nurture',
+    name: 'Lead Nurture Agent',
+    type: 'Follow-up',
+    temperature: 0.35,
+    tools: ['Email sequence', 'CRM notes', 'Follow-up tasks', 'Objection response'],
+    systemPrompt: 'You create sales follow-up drafts and CRM notes that require human approval before sending or publishing.'
+  },
+  {
+    key: 'email-outreach',
+    name: 'Email Outreach Agent',
+    type: 'Outbound',
+    temperature: 0.45,
+    tools: ['Cold email draft', 'Subject lines', 'Reply follow-up', 'Personalization notes'],
+    systemPrompt: 'You draft compliant outreach emails and follow-ups using tenant context, keeping credentials and private data protected.'
+  },
+  {
+    key: 'crm-relationship',
+    name: 'CRM Relationship Agent',
+    type: 'CRM',
+    temperature: 0.3,
+    tools: ['Customer summary', 'Health notes', 'Relationship risks', 'Next action'],
+    systemPrompt: 'You summarize customer relationship history, health signals, risks, and recommended next actions.'
+  },
+  {
+    key: 'retention',
+    name: 'Customer Retention Agent',
+    type: 'Retention',
+    temperature: 0.35,
+    tools: ['Renewal notes', 'Churn risk', 'Success plan', 'Expansion ideas'],
+    systemPrompt: 'You help tenant teams retain customers by identifying risks, renewal actions, success plans, and expansion opportunities.'
+  },
+  {
+    key: 'task-router',
+    name: 'Task Allocation Agent',
+    type: 'Operations',
+    temperature: 0.2,
+    tools: ['Task routing', 'Priority suggestion', 'Owner recommendation', 'Due date notes'],
+    systemPrompt: 'You recommend task owners, priorities, and due dates based on tenant team roles and workflow context.'
+  },
+  {
+    key: 'analytics-insight',
+    name: 'Analytics Insight Agent',
+    type: 'Analytics',
+    temperature: 0.25,
+    tools: ['Performance summary', 'Insight notes', 'Experiment ideas', 'Reporting narrative'],
+    systemPrompt: 'You explain campaign, lead, and CRM performance in plain language with practical improvement suggestions.'
+  },
+  {
+    key: 'approval-guard',
+    name: 'Approval Guard',
+    type: 'Governance',
+    temperature: 0.15,
+    tools: ['Risk review', 'Policy check', 'Credential safety', 'Human approval gate'],
+    systemPrompt: 'You review AI outputs for brand, compliance, privacy, and credential safety before a human decides.'
+  }
+];
+
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -663,23 +762,19 @@ app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, ne
   const tenantId = req.body?.tenantId || defaultTenantId;
   try {
     const model = cleanString(req.body?.model) || await pickDefaultModel();
-    const templates = [
-      ['Campaign Strategist', 'Planning', 0.4, ['Market research', 'Audience map', 'Budget split'], 'You are a marketing campaign strategist. Create concise plans for human approval.'],
-      ['Social Copywriter', 'Content', 0.7, ['Caption draft', 'Hashtag set', 'Tone rewrite'], 'You write clear social media copy for human approval.'],
-      ['Lead Nurture Agent', 'Follow-up', 0.3, ['Email sequence', 'CRM notes', 'Follow-up tasks'], 'You create sales follow-up drafts and CRM notes for human approval.'],
-      ['Approval Guard', 'Governance', 0.2, ['Risk review', 'Policy check'], 'You review AI outputs for risks before a human decides.']
-    ];
-    for (const [name, type, temperature, tools, systemPrompt] of templates) {
+    const requestedCount = boundedInt(req.body?.agentCount ?? req.body?.count, 1, AGENT_TEMPLATES.length, 6);
+    const templates = AGENT_TEMPLATES.slice(0, requestedCount);
+    for (const template of templates) {
       await pool.query(
         `insert into ai_agents (tenant_id, name, type, model, temperature, approval_rule, status, tools, system_prompt)
          select $1,$2,$3,$4,$5,'Human approval before execution','Ready',$6,$7
           where not exists (
             select 1 from ai_agents where tenant_id = $1 and name = $2
           )`,
-        [tenantId, name, type, model, temperature, tools, systemPrompt]
+        [tenantId, template.name, template.type, model, template.temperature, template.tools, template.systemPrompt]
       );
     }
-    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.framework_activate', entityType: 'ai_agent', entityId: tenantId, details: { model } });
+    await logAudit({ tenantId, actorUserId: req.user.id, action: 'ai.framework_activate', entityType: 'ai_agent', entityId: tenantId, details: { model, requestedCount, templates: templates.map((template) => template.key) } });
     const result = await pool.query(
       `select id, tenant_id as "tenantId", name, type, model, temperature, approval_rule as "approvalRule",
               status, tools, system_prompt as "systemPrompt"
@@ -688,7 +783,7 @@ app.post('/api/ai/framework/activate', requirePlatformAdmin, async (req, res, ne
         order by created_at`,
       [tenantId]
     );
-    res.json({ ok: true, tenantId, model, agents: result.rows });
+    res.json({ ok: true, tenantId, model, requestedCount, templates, agents: result.rows });
   } catch (error) {
     next(error);
   }
@@ -1405,6 +1500,10 @@ app.get('/api/ai/agents', requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/ai/agent-templates', requirePlatformAdmin, (_req, res) => {
+  res.json({ ok: true, templates: AGENT_TEMPLATES, maxAgents: AGENT_TEMPLATES.length, recommendedAgents: 6 });
 });
 
 app.post('/api/ai/agents', requirePlatformAdmin, async (req, res, next) => {

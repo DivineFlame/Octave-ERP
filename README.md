@@ -197,6 +197,7 @@ The included API service exposes:
 - `POST /api/ai/ollama/test`
 - `POST /api/ai/ollama/pull`
 - `GET /api/ai/agents`
+- `GET /api/ai/agent-templates`
 - `POST /api/ai/agents`
 - `PUT /api/ai/agents/:id`
 - `POST /api/ai/agents/:id/run`
@@ -232,6 +233,10 @@ The included API service exposes:
 - `POST /api/follow-ups`
 - `PATCH /api/follow-ups/:id`
 - `DELETE /api/follow-ups/:id`
+
+## Agent templates
+
+Platform admin can select a tenant, choose the required number of agents, and activate the framework from the AI Agents view. The backend ships templates for campaign strategy, social copy, content scheduling, social listening, lead scoring, lead nurture, email outreach, CRM relationship management, retention, task allocation, analytics insight, and approval governance. Each saved agent remains editable for model, temperature, function, tools, status, approval rule, and system prompt.
 - `GET /api/customers`
 - `POST /api/customers`
 - `PATCH /api/customers/:id`

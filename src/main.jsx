@@ -576,6 +576,10 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
   const [output, setOutput] = useState('');
   const [modelToFetch, setModelToFetch] = useState('llama3.2:3b');
   const [paperclipModels, setPaperclipModels] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [agentCount, setAgentCount] = useState(6);
+  const [editingAgentId, setEditingAgentId] = useState('');
+  const [editAgent, setEditAgent] = useState(null);
   const [agentForm, setAgentForm] = useState({ name: 'Campaign Assistant', type: 'Content', model: 'llama3.1:8b', temperature: 0.4, approvalRule: 'Human approval before execution', tools: 'Caption draft, Email draft', systemPrompt: 'You create marketing drafts for human approval.' });
   const [workflowForm, setWorkflowForm] = useState({ type: 'campaign_brief', title: 'Campaign brief draft', campaignName: '', subject: '', recipient: '', channels: 'Email, Instagram', context: '', dueAt: '', priority: 'Medium', channel: 'Email' });
   const [jobs, setJobs] = useState([]);
@@ -595,6 +599,12 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
     if (agentsResult.status === 'fulfilled') setAgents(agentsResult.value.agents || []);
     if (modelsResult.status === 'fulfilled') setModels(modelsResult.value.installed || modelsResult.value.models || []);
     if (paperclipModelsResult.status === 'fulfilled') setPaperclipModels(paperclipModelsResult.value.models || []);
+    if (isAdmin) {
+      api('/api/ai/agent-templates').then((result) => {
+        setTemplates(result.templates || []);
+        setAgentCount((current) => Math.min(Math.max(Number(current) || result.recommendedAgents || 6, 1), result.maxAgents || 12));
+      }).catch(() => {});
+    }
     if (!isAdmin) {
       api(`/api/scheduled-jobs?tenantId=${tenantId}`).then((result) => setJobs(result.jobs || [])).catch(() => {});
       api(`/api/scheduled-job-runs?tenantId=${tenantId}`).then((result) => setJobRuns(result.runs || [])).catch(() => {});
@@ -625,12 +635,42 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
     setStatus('AI agent configuration saved by platform admin');
   }
 
+  function startEditAgent(agent) {
+    setEditingAgentId(agent.id);
+    setEditAgent({
+      name: agent.name || '',
+      type: agent.type || 'General',
+      model: agent.model || selectedModel,
+      temperature: agent.temperature ?? 0.4,
+      approvalRule: agent.approvalRule || 'Human approval before execution',
+      status: agent.status || 'Ready',
+      tools: (agent.tools || []).join(', '),
+      systemPrompt: agent.systemPrompt || ''
+    });
+  }
+
+  async function saveAgentSettings(event) {
+    event.preventDefault();
+    if (!editingAgentId || !editAgent) return;
+    const result = await api(`/api/ai/agents/${editingAgentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...editAgent,
+        tools: editAgent.tools.split(',').map((item) => item.trim()).filter(Boolean)
+      })
+    });
+    setAgents((current) => current.map((agent) => agent.id === result.agent.id ? result.agent : agent));
+    setEditingAgentId('');
+    setEditAgent(null);
+    setStatus(`${result.agent.name} settings updated`);
+  }
+
   async function activateFramework() {
-    setStatus('Activating agentic framework...');
+    setStatus(`Activating ${agentCount} templated agent(s)...`);
     try {
-      const result = await api('/api/ai/framework/activate', { method: 'POST', body: JSON.stringify({ tenantId, model: selectedModel }) });
+      const result = await api('/api/ai/framework/activate', { method: 'POST', body: JSON.stringify({ tenantId, model: selectedModel, agentCount: Number(agentCount) }) });
       setAgents(result.agents || []);
-      setStatus(`Agentic framework active with ${result.agents?.length || 0} agent(s) on ${result.model}`);
+      setStatus(`Agentic framework active with ${result.agents?.length || 0} saved agent(s) on ${result.model}`);
     } catch (error) {
       setStatus(error.message);
     }
@@ -684,6 +724,8 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
         <label>Type<input value={agentForm.type} onChange={(event) => setAgentForm({ ...agentForm, type: event.target.value })} /></label>
         <label>Installed Ollama model<select value={agentForm.model} onChange={(event) => setAgentForm({ ...agentForm, model: event.target.value })}>{models.length ? models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>) : <option value={agentForm.model}>{agentForm.model}</option>}</select></label>
         <label>Fetch / install model<div className="inlineField"><input value={modelToFetch} onChange={(event) => setModelToFetch(event.target.value)} placeholder="llama3.2:3b" /><button className="secondaryButton" type="button" onClick={fetchModel}><Plus size={16} /> Fetch</button></div></label>
+        <label>Required agents<input type="number" min="1" max={templates.length || 12} value={agentCount} onChange={(event) => setAgentCount(event.target.value)} /></label>
+        <div className="templatePreview">{templates.slice(0, Number(agentCount) || 0).map((template) => <span key={template.key}>{template.name}</span>)}</div>
         <label>Temperature<input type="number" step="0.1" min="0" max="1" value={agentForm.temperature} onChange={(event) => setAgentForm({ ...agentForm, temperature: event.target.value })} /></label>
         <label>Tools<input value={agentForm.tools} onChange={(event) => setAgentForm({ ...agentForm, tools: event.target.value })} /></label>
         <label>System prompt<textarea rows="4" value={agentForm.systemPrompt} onChange={(event) => setAgentForm({ ...agentForm, systemPrompt: event.target.value })} /></label>
@@ -714,7 +756,19 @@ function AgentAdmin({ tenantId, isAdmin, isPlatformHome = false, selectedTenantN
         <h3>Recent Runs</h3>
         <div className="timeline">{jobRuns.slice(0, 5).map((run) => <div className="timeItem" key={run.id}><span className="time">{run.status}</span><div><strong>{run.jobName || 'Scheduled job'}</strong><p>{formatDue(run.startedAt)}{run.approvalId ? ` · approval ${run.approvalId.slice(0, 8)}` : ''}</p>{run.error && <small>{run.error}</small>}</div></div>)}</div>
       </form>}
-      <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}><div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{!isAdmin && <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}</article>)}</div>
+      <div className="agentCards">{agents.map((agent) => <article className="agentCard" key={agent.id}>{isAdmin && editingAgentId === agent.id && editAgent ? <form className="inlineEditForm" onSubmit={saveAgentSettings}>
+        <label>Name<input value={editAgent.name} onChange={(event) => setEditAgent({ ...editAgent, name: event.target.value })} /></label>
+        <label>Function<input value={editAgent.type} onChange={(event) => setEditAgent({ ...editAgent, type: event.target.value })} /></label>
+        <label>Model<select value={editAgent.model} onChange={(event) => setEditAgent({ ...editAgent, model: event.target.value })}>{models.length ? models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>) : <option value={editAgent.model}>{editAgent.model}</option>}</select></label>
+        <label>Temperature<input type="number" step="0.1" min="0" max="1" value={editAgent.temperature} onChange={(event) => setEditAgent({ ...editAgent, temperature: event.target.value })} /></label>
+        <label>Status<select value={editAgent.status} onChange={(event) => setEditAgent({ ...editAgent, status: event.target.value })}><option>Ready</option><option>Paused</option><option>Testing</option></select></label>
+        <label>Approval rule<input value={editAgent.approvalRule} onChange={(event) => setEditAgent({ ...editAgent, approvalRule: event.target.value })} /></label>
+        <label>Tools<input value={editAgent.tools} onChange={(event) => setEditAgent({ ...editAgent, tools: event.target.value })} /></label>
+        <label>System prompt<textarea rows="4" value={editAgent.systemPrompt} onChange={(event) => setEditAgent({ ...editAgent, systemPrompt: event.target.value })} /></label>
+        <div className="formActions"><button className="secondaryButton" type="button" onClick={() => { setEditingAgentId(''); setEditAgent(null); }}>Cancel</button><button className="primaryButton" type="submit"><Check size={16} /> Save settings</button></div>
+      </form> : <>
+        <div className="agentTop"><div><h3>{agent.name}</h3><p>{agent.type} · {agent.model}</p></div><span>{Number(agent.temperature)}</span></div><div className="chips">{(agent.tools || []).map((tool) => <span key={tool}>{tool}</span>)}</div><footer><Clock3 size={15} /><span>{agent.approvalRule} · {agent.status}</span></footer>{isAdmin ? <button className="inlineAction" onClick={() => startEditAgent(agent)}>Edit settings</button> : <button className="inlineAction" onClick={() => runAgent(agent)}>Run draft</button>}
+      </>}</article>)}</div>
     </div>
   </Panel></section>;
 }

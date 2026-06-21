@@ -659,6 +659,22 @@ p, small, .muted { color: var(--muted); }
   gap: 7px;
 }
 
+.templatePreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.templatePreview span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #f7faf9;
+  color: #40515a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .agentCard { padding: 11px; }
 .adminList {
   grid-column: 1 / -1;
@@ -688,6 +704,32 @@ p, small, .muted { color: var(--muted); }
   margin-top: 10px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.inlineEditForm {
+  display: grid;
+  gap: 9px;
+}
+
+.inlineEditForm label {
+  display: grid;
+  gap: 5px;
+  color: #40515a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inlineEditForm input, .inlineEditForm select, .inlineEditForm textarea {
+  width: 100%;
+  border: 1px solid #cddbd7;
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: white;
+  font-size: 13px;
+}
+
+.inlineEditForm textarea {
+  resize: vertical;
 }
 
 .statusStrip, .responseBox {
